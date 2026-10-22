@@ -1,0 +1,5 @@
+WEBAPP FUTTATÁSÁHOZ:
+npm run dev
+
+API:
+3adab20b-3b23-4778-be2d-1857aafd72b7
