@@ -195,7 +195,19 @@ export default function App() {
 
       await Promise.all(fetchPromises);
 
+      const getRoutePriority = (option) => {
+        if (
+          ['SUBWAY', 'SUBURBAN_RAILWAY', 'RAIL'].includes(option.type) ||
+          ['M1', 'M2', 'M3', 'M4', 'H5', 'H6', 'H7', 'H8', 'H9'].includes(option.route)
+        ) {
+          return 0;
+        }
+        if (option.type === 'TRAM') return 1;
+        return 2;
+      };
+
       const optionsArr = Array.from(optionsMap.values()).sort((a, b) =>
+        getRoutePriority(a) - getRoutePriority(b) ||
         a.route.localeCompare(b.route, undefined, { numeric: true })
       );
       setRouteOptions(optionsArr);
