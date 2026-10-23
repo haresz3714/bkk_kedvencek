@@ -447,7 +447,7 @@ export default function App() {
                         {renderVehicleBadge(opt.route, opt.type, opt.color, opt.textColor)}
                       </div>
                       <DestinationText className="text-sm opacity-80">
-                        Irány: {opt.headsign}
+                        {opt.headsign} felé
                       </DestinationText>
                     </button>
                   ))}
@@ -513,6 +513,9 @@ export default function App() {
             ))}
           </div>
         )}
+        <p className="mt-3 text-center text-xs italic text-zinc-500">
+          A valós végállomások a feltüntetettektől eltérhetnek.
+        </p>
       </div>
       <footer className="mt-8 text-center text-sm text-zinc-400">
         <p>
