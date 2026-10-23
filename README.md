@@ -3,22 +3,23 @@
 # Weben elérhető:
 ## https://bkk-kedvencek.netlify.app/
 
+Mentsd el a leggyakrabban használt megállóidat és járataidat az egyszerűbb, gyorsabb menetrendellenőrzés érdekében.
 Egy modern, gyors és reszponzív webalkalmazás Budapest tömegközlekedési adataihoz, amely valós időben jeleníti meg a kiválasztott megállók indulási idejét, járatait és irányait.
 
 ## ✨ Főbb Funkciók
 
+- **Helyi mentés (LocalStorage):** A kedvenc megállók és járatok megmaradnak a böngésző bezárása után is.
 - **Okos megállókereső:** Valós idejű keresés a BKK megállói között név szerinti csoportosítással.
 - **Többidőpontos élő lista:** Nemcsak a leghamarabb induló járatot mutatja, hanem a következő indulásokat is jelzi.
 - **Hivatalos BKK arculat és színek:** Egyedi jelvények és hivatalos színkódok a metróknak (M1–M4), HÉV-eknek (H5–H9) és a felszíni járatoknak (buszok, villamosok, trolik).
-- **Helyi mentés (LocalStorage):** A kedvenc megállók és járatok megmaradnak a böngésző bezárása után is.
-- **Reszponzív dizájn:** Mobilra és asztali gépre optimalizált, sötét módú felület (Tailwind CSS).
+- **Reszponzív dizájn:** Mobilra és asztali gépre optimalizált, sötét módú felület.
 
 ## 🛠️ Technológiai Stack
 
 - **Frontend:** React (Vite)
 - **Stílus:** Tailwind CSS
 - **Ikonok:** Lucide React
-- **Adatforrás:** BKK FUTÁR API (Open Data)
+- **Adatforrás:** BKK Zrt., CC BY 4.0
 
 ## 🚀 Helyi futtatás és fejlesztés
 
