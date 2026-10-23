@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+html,
+body {
+  background-color: #18181b;
+}
+
 @keyframes destination-pan {
   0%, 12% {
     transform: translateX(0);
