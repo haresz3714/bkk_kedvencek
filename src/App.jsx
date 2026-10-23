@@ -281,13 +281,13 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 font-sans pb-20">
-      <div className="max-w-md mx-auto">
-        <h1 className="text-2xl font-bold mb-6 text-center text-yellow-400">BKK Kedvencek</h1>
+    <div className="min-h-screen bg-zinc-900 text-white p-4 font-sans pb-20 flex flex-col">
+      <div className="max-w-md mx-auto w-full flex-1">
+        <h1 className="text-2xl font-bold mb-6 text-center text-violet-300">BKK Kedvencek</h1>
 
-        <div className="bg-gray-800 p-4 rounded-xl mb-6 shadow-lg border border-gray-700">
+        <div className="bg-zinc-800 p-4 rounded-xl mb-6 shadow-lg border border-zinc-700">
           <h2 className="text-lg font-semibold mb-3 flex items-center">
-            <Search className="mr-2 w-5 h-5 text-yellow-400" /> Új járat hozzáadása
+            <Search className="mr-2 w-5 h-5 text-violet-300" /> Új járat hozzáadása
           </h2>
 
           {!selectedStopName ? (
@@ -297,18 +297,18 @@ export default function App() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Megálló keresése (pl. Mechwart)"
-                className="w-full bg-gray-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400 border border-gray-600 text-lg mb-2 transition-all"
+                className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg mb-2 transition-all"
               />
 
               {stopResults.length > 0 && (
-                <div className="bg-gray-700 rounded-lg overflow-hidden mt-2 animate-in fade-in">
+                <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2 animate-in fade-in">
                   {stopResults.map(stop => (
                     <button
                       key={stop.name}
                       onClick={() => fetchRoutesForStop(stop.name, stop.stopIds)}
-                      className="w-full flex items-center p-3 border-b border-gray-600 hover:bg-gray-600 transition-colors text-left"
+                      className="w-full flex items-center p-3 border-b border-zinc-600 hover:bg-zinc-600 transition-colors text-left"
                     >
-                      <MapPin className="w-5 h-5 mr-3 text-gray-400 flex-shrink-0" />
+                      <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
                       <span className="font-bold text-base md:text-lg">{stop.name}</span>
                     </button>
                   ))}
@@ -317,20 +317,20 @@ export default function App() {
             </>
           ) : (
             <div className="animate-in fade-in slide-in-from-right-4">
-              <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
-                <h3 className="font-bold text-yellow-400 flex items-center text-lg pr-4 truncate">
+              <div className="flex justify-between items-center mb-4 border-b border-zinc-700 pb-2">
+                <h3 className="font-bold text-violet-300 flex items-center text-lg pr-4 truncate">
                   <MapPin className="w-5 h-5 mr-2 flex-shrink-0" /> <span className="truncate">{selectedStopName}</span>
                 </h3>
                 <button
                   onClick={() => { setSelectedStopName(null); setRouteOptions([]); }}
-                  className="p-1 bg-gray-700 rounded-full hover:bg-gray-600 flex-shrink-0 transition-colors"
+                  className="p-1 bg-zinc-700 rounded-full hover:bg-zinc-600 flex-shrink-0 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               {isLoadingRoutes ? (
-                <div className="text-center py-6 text-gray-400 flex justify-center items-center">
+                <div className="text-center py-6 text-zinc-400 flex justify-center items-center">
                   <Clock className="animate-spin w-5 h-5 mr-2" /> Járatok betöltése...
                 </div>
               ) : (
@@ -339,7 +339,7 @@ export default function App() {
                     <button
                       key={idx}
                       onClick={() => handleAddFavorite(opt)}
-                      className="w-full bg-gray-700 hover:bg-yellow-500 hover:text-black transition-colors p-3 rounded-lg text-left flex flex-col group"
+                      className="w-full bg-zinc-700 hover:bg-violet-700 hover:text-white transition-colors p-3 rounded-lg text-left flex flex-col group"
                     >
                       <div className="flex items-center font-bold text-lg mb-1">
                         {renderVehicleBadge(opt.route, opt.type, opt.color, opt.textColor)}
@@ -354,25 +354,25 @@ export default function App() {
         </div>
 
         <h2 className="text-lg font-semibold mb-3 flex items-center">
-          <Clock className="mr-2 w-5 h-5 text-yellow-400" /> Mentett indulások
+          <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
         </h2>
 
         {favorites.length === 0 ? (
-          <div className="text-center text-gray-500 py-8 bg-gray-800 rounded-xl border border-gray-700 border-dashed">
+          <div className="text-center text-zinc-500 py-8 bg-zinc-800 rounded-xl border border-zinc-700 border-dashed">
             Keresd meg a megállódat, és adj hozzá járatokat!
           </div>
         ) : (
           <div className="space-y-3">
             {favorites.map((fav) => (
-              <div key={fav.id} className="bg-gray-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-yellow-400">
+              <div key={fav.id} className="bg-zinc-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-violet-400">
                 <div className="flex-1 pr-2 overflow-hidden">
                   <h3 className="font-bold flex items-center text-base md:text-lg truncate">
-                    <MapPin className="w-4 h-4 mr-1 text-gray-400 flex-shrink-0" />
+                    <MapPin className="w-4 h-4 mr-1 text-zinc-400 flex-shrink-0" />
                     <span className="truncate">{fav.stopName}</span>
                   </h3>
                   <div className="flex items-center mt-2 overflow-hidden">
                     {renderVehicleBadge(fav.route, fav.type, fav.color, fav.textColor)}
-                    <span className="text-sm text-gray-300 line-clamp-1">{fav.headsign} felé</span>
+                    <span className="text-sm text-zinc-300 line-clamp-1">{fav.headsign} felé</span>
                   </div>
                 </div>
 
@@ -385,20 +385,20 @@ export default function App() {
                           {liveTimes[fav.id][0]}
                         </span>
                         {liveTimes[fav.id].length > 1 && (
-                          <span className="text-xs font-semibold text-gray-400 mt-1 whitespace-nowrap">
+                          <span className="text-xs font-semibold text-zinc-400 mt-1 whitespace-nowrap">
                             majd: {liveTimes[fav.id].slice(1).join(', ')}
                           </span>
                         )}
                       </>
                     ) : (
-                      <span className="text-lg font-bold text-gray-500">
+                      <span className="text-lg font-bold text-zinc-500">
                         {liveTimes[fav.id] ? liveTimes[fav.id][0] : '...'}
                       </span>
                     )}
                   </div>
                   <button
                     onClick={() => removeFavorite(fav.id)}
-                    className="text-red-400 hover:text-red-300 hover:bg-gray-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center"
+                    className="text-red-400 hover:text-red-300 hover:bg-zinc-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>
@@ -408,6 +408,20 @@ export default function App() {
           </div>
         )}
       </div>
+      <footer className="mt-8 text-center text-sm text-zinc-400">
+        <p>
+          GitHub:{' '}
+          <a
+            href="https://github.com/haresz3714"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-violet-300 underline underline-offset-2 hover:text-white"
+          >
+            github.com/haresz3714
+          </a>
+        </p>
+        <p className="mt-1">Adatok forrása: BKK Zrt., CC BY 4.0</p>
+      </footer>
     </div>
   );
 }
