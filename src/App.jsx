@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, Clock, Plus, Trash2, TramFront, Bus, Train, X } from 'lucide-react';
 
-const API_KEY = import.meta.env.VITE_BKK_API_KEY; // <-- IDE ÍRD BE A BKK API KULCSODAT!
+const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 
 export default function App() {
   const [favorites, setFavorites] = useState(() => {
@@ -42,7 +42,6 @@ export default function App() {
             const routes = result.data.references.routes || {};
 
             favorites.filter(f => f.stopId === stopId).forEach(fav => {
-              // Megkeressük az összes járatot, ami megegyezik
               // Megkeressük az összes járatot, ami megegyezik
               const matchingRides = stopTimes.filter(item => {
                 const trip = trips[item.tripId] || {};
@@ -181,9 +180,9 @@ export default function App() {
                     route: route.shortName,
                     directionId: dirId,
                     headsign: displayHeadsign,
-                    type: route.type,             // <-- ÚJ
-                    color: route.color,           // <-- ÚJ
-                    textColor: route.textColor    // <-- ÚJ
+                    type: route.type,             
+                    color: route.color,          
+                    textColor: route.textColor    
                   });
                 }
               });
@@ -215,9 +214,9 @@ export default function App() {
       route: option.route,
       directionId: option.directionId,
       headsign: option.headsign,
-      type: option.type,           // <-- ÚJ
-      color: option.color,         // <-- ÚJ
-      textColor: option.textColor  // <-- ÚJ
+      type: option.type,           
+      color: option.color,         
+      textColor: option.textColor  
     };
 
 
@@ -283,7 +282,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-900 text-white p-4 font-sans pb-20 flex flex-col">
       <div className="max-w-md mx-auto w-full flex-1">
-        <h1 className="text-2xl font-bold mb-6 text-center text-violet-300">BKK Kedvencek</h1>
+        <h1 className="text-2xl font-bold mb-6 text-center text-violet-300">BudapestGO <i>Rapid</i></h1>
 
         <div className="bg-zinc-800 p-4 rounded-xl mb-6 shadow-lg border border-zinc-700">
           <h2 className="text-lg font-semibold mb-3 flex items-center">
@@ -296,7 +295,7 @@ export default function App() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Megálló keresése (pl. Mechwart)"
+                placeholder="Megálló keresése (pl. Széll Kálmán tér)"
                 className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg mb-2 transition-all"
               />
 
