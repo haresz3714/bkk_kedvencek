@@ -8,7 +8,7 @@ export default function App() {
     const saved = localStorage.getItem('bkk_favorites');
     return saved ? JSON.parse(saved) : [];
   });
-  
+
   // Most már tömböket (több időpontot) tárolunk egy-egy járathoz
   const [liveTimes, setLiveTimes] = useState({});
 
@@ -25,7 +25,7 @@ export default function App() {
   useEffect(() => {
     const fetchTimes = async () => {
       if (favorites.length === 0 || !API_KEY || API_KEY === "A_TE_API_KULCSOD") return;
-      
+
       const newTimes = {};
       const nowInSeconds = Math.floor(Date.now() / 1000);
       const uniqueStops = [...new Set(favorites.map(f => f.stopId))];
@@ -43,39 +43,39 @@ export default function App() {
 
             favorites.filter(f => f.stopId === stopId).forEach(fav => {
               // Megkeressük az összes járatot, ami megegyezik
+              // Megkeressük az összes járatot, ami megegyezik
               const matchingRides = stopTimes.filter(item => {
                 const trip = trips[item.tripId] || {};
                 const route = routes[trip.routeId] || {};
                 const lineName = route.shortName || "Ismeretlen";
 
-                // Ha van mentett irány (új mentések), az alapján szűrünk a szöveg helyett
                 if (fav.directionId !== undefined) {
-                  return lineName === fav.route && trip.directionId === fav.directionId;
+                  // Biztonsági string konverzió a pontos egyezéshez
+                  return lineName === fav.route && String(trip.directionId) === String(fav.directionId);
                 } else {
-                  // Visszafelé kompatibilitás a régi mentésekhez
                   const headsign = item.stopHeadsign || "";
                   return lineName === fav.route && headsign.toLowerCase().includes(fav.headsign.toLowerCase());
                 }
               });
 
               if (matchingRides.length > 0) {
-                // Időrendbe állítjuk az indulásokat
+                // Időrendbe állítjuk az indulásokat (bővítve a végállomási indulási időkkel)
                 matchingRides.sort((a, b) => {
-                  const timeA = a.predictedArrivalTime || a.arrivalTime;
-                  const timeB = b.predictedArrivalTime || b.arrivalTime;
+                  const timeA = a.predictedDepartureTime || a.predictedArrivalTime || a.departureTime || a.arrivalTime;
+                  const timeB = b.predictedDepartureTime || b.predictedArrivalTime || b.departureTime || b.arrivalTime;
                   return timeA - timeB;
                 });
 
                 // Kiszűrjük a már elment járatokat, és percre alakítjuk
                 const validTimes = matchingRides
                   .map(ride => {
-                    const timeInEpoch = ride.predictedArrivalTime || ride.arrivalTime;
+                    const timeInEpoch = ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
                     return Math.round((timeInEpoch - nowInSeconds) / 60);
                   })
                   .filter(mins => mins > -2); // Ami 1 perce ment el, az még lehet "Most"
 
                 const formattedTimes = validTimes.map(mins => mins <= 0 ? 'Most' : `${mins}'`);
-                
+
                 // Maximum 3 időpontot mentünk el
                 newTimes[fav.id] = formattedTimes.length > 0 ? formattedTimes.slice(0, 3) : ['Nincs adat'];
               } else {
@@ -106,7 +106,7 @@ export default function App() {
       try {
         const res = await fetch(`https://go.bkk.hu/api/query/v1/ws/otp/api/where/search.json?key=${API_KEY}&query=${encodeURIComponent(searchQuery)}&includeReferences=true`);
         const data = await res.json();
-        
+
         if (data.code === 200 && data.data) {
           const stopIds = data.data.entry.stopIds || [];
           const stopsRef = data.data.references.stops || {};
@@ -143,7 +143,7 @@ export default function App() {
         try {
           const res = await fetch(`https://go.bkk.hu/api/query/v1/ws/otp/api/where/schedule-for-stop.json?key=${API_KEY}&stopId=${stopId}&includeReferences=true`);
           const data = await res.json();
-          
+
           if (data.code === 200 && data.data) {
             const schedules = data.data.entry.schedules || [];
             const routesRef = data.data.references.routes || {};
@@ -154,11 +154,24 @@ export default function App() {
 
               sched.directions?.forEach(dir => {
                 const dirId = dir.directionId;
-                
-                // Összeszedjük a variánsok összes lehetséges végállomását egy irányhoz
-                const headsigns = Object.values(dir.groups || {}).map(g => g.headsign);
-                // Összevonjuk őket perjelekkel (pl. "Városház tér / Savoya Park")
-                const displayHeadsign = [...new Set(headsigns)].join(' / ');
+
+                // Összeszedjük a tényleges napi indulásokhoz tartozó célállomásokat
+                const headsigns = dir.stopTimes?.map(st => st.stopHeadsign).filter(Boolean) || [];
+
+                let displayHeadsign = "Ismeretlen";
+                if (headsigns.length > 0) {
+                  const counts = {};
+                  let maxCount = 0;
+
+                  // Megkeressük a leggyakrabban előforduló célállomást
+                  headsigns.forEach(hs => {
+                    counts[hs] = (counts[hs] || 0) + 1;
+                    if (counts[hs] > maxCount) {
+                      maxCount = counts[hs];
+                      displayHeadsign = hs;
+                    }
+                  });
+                }
 
                 // Azonosító: Járatszám + Irány (Nem a szöveg!)
                 const key = `${route.shortName}-${dirId}`;
@@ -183,14 +196,14 @@ export default function App() {
 
       await Promise.all(fetchPromises);
 
-      const optionsArr = Array.from(optionsMap.values()).sort((a, b) => 
+      const optionsArr = Array.from(optionsMap.values()).sort((a, b) =>
         a.route.localeCompare(b.route, undefined, { numeric: true })
       );
       setRouteOptions(optionsArr);
     } catch (e) {
       console.error("Általános hiba az útvonalak feldolgozásakor:", e);
     }
-    
+
     setIsLoadingRoutes(false);
   };
 
@@ -206,10 +219,10 @@ export default function App() {
       color: option.color,         // <-- ÚJ
       textColor: option.textColor  // <-- ÚJ
     };
-    
-    
+
+
     setFavorites([...favorites, newFavorite]);
-    
+
     setSelectedStopName(null);
     setSearchQuery('');
     setStopResults([]);
@@ -220,10 +233,10 @@ export default function App() {
     setFavorites(favorites.filter(fav => fav.id !== id));
   };
 
-const renderVehicleBadge = (route, type, color, textColor) => {
-    let bgColor = color ? `#${color}` : '#009FE3'; 
+  const renderVehicleBadge = (route, type, color, textColor) => {
+    let bgColor = color ? `#${color}` : '#009FE3';
     let txtColor = textColor ? `#${textColor}` : '#FFFFFF';
-    
+
     // Alapértelmezetten a SUBWAY és a SUBURBAN_RAILWAY kap ikontalan jelvényt, de kibővítjük a RAIL-el is
     let isBadgeOnly = type === 'SUBWAY' || type === 'SUBURBAN_RAILWAY' || type === 'RAIL';
 
@@ -234,7 +247,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
       if (route === 'M2') { bgColor = '#FF1C24'; txtColor = '#FFFFFF'; }
       if (route === 'M3') { bgColor = '#005CA5'; txtColor = '#FFFFFF'; }
       if (route === 'M4') { bgColor = '#19A74E'; txtColor = '#FFFFFF'; }
-    } 
+    }
     else if (['H5', 'H6', 'H7', 'H8', 'H9'].includes(route)) {
       isBadgeOnly = true;
       if (route === 'H5') { bgColor = '#821066'; txtColor = '#FFFFFF'; } // Lila
@@ -246,7 +259,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
     // 2. Metrók és HÉV-ek (Ikon nélkül, csak szöveg)
     if (isBadgeOnly) {
       return (
-        <span 
+        <span
           className="px-2 py-0.5 rounded text-sm font-bold mr-2 flex items-center justify-center flex-shrink-0 min-w-[2.5rem]"
           style={{ backgroundColor: bgColor, color: txtColor }}
         >
@@ -254,14 +267,14 @@ const renderVehicleBadge = (route, type, color, textColor) => {
         </span>
       );
     }
-    
+
     // 3. Felszíni járatok (Busz, Troli, Villamos + Ikon)
     return (
-      <span 
+      <span
         className="px-2 py-0.5 rounded text-sm font-bold mr-2 flex items-center flex-shrink-0"
         style={{ backgroundColor: bgColor, color: txtColor }}
       >
-        {type === 'TRAM' ? <TramFront className="w-3 h-3 mr-1"/> : <Bus className="w-3 h-3 mr-1"/>}
+        {type === 'TRAM' ? <TramFront className="w-3 h-3 mr-1" /> : <Bus className="w-3 h-3 mr-1" />}
         {route}
       </span>
     );
@@ -274,7 +287,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
 
         <div className="bg-gray-800 p-4 rounded-xl mb-6 shadow-lg border border-gray-700">
           <h2 className="text-lg font-semibold mb-3 flex items-center">
-            <Search className="mr-2 w-5 h-5 text-yellow-400"/> Új járat hozzáadása
+            <Search className="mr-2 w-5 h-5 text-yellow-400" /> Új járat hozzáadása
           </h2>
 
           {!selectedStopName ? (
@@ -286,7 +299,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
                 placeholder="Megálló keresése (pl. Mechwart)"
                 className="w-full bg-gray-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400 border border-gray-600 text-lg mb-2 transition-all"
               />
-              
+
               {stopResults.length > 0 && (
                 <div className="bg-gray-700 rounded-lg overflow-hidden mt-2 animate-in fade-in">
                   {stopResults.map(stop => (
@@ -295,7 +308,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
                       onClick={() => fetchRoutesForStop(stop.name, stop.stopIds)}
                       className="w-full flex items-center p-3 border-b border-gray-600 hover:bg-gray-600 transition-colors text-left"
                     >
-                      <MapPin className="w-5 h-5 mr-3 text-gray-400 flex-shrink-0"/>
+                      <MapPin className="w-5 h-5 mr-3 text-gray-400 flex-shrink-0" />
                       <span className="font-bold text-base md:text-lg">{stop.name}</span>
                     </button>
                   ))}
@@ -306,19 +319,19 @@ const renderVehicleBadge = (route, type, color, textColor) => {
             <div className="animate-in fade-in slide-in-from-right-4">
               <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
                 <h3 className="font-bold text-yellow-400 flex items-center text-lg pr-4 truncate">
-                  <MapPin className="w-5 h-5 mr-2 flex-shrink-0"/> <span className="truncate">{selectedStopName}</span>
+                  <MapPin className="w-5 h-5 mr-2 flex-shrink-0" /> <span className="truncate">{selectedStopName}</span>
                 </h3>
-                <button 
-                  onClick={() => { setSelectedStopName(null); setRouteOptions([]); }} 
+                <button
+                  onClick={() => { setSelectedStopName(null); setRouteOptions([]); }}
                   className="p-1 bg-gray-700 rounded-full hover:bg-gray-600 flex-shrink-0 transition-colors"
                 >
-                  <X className="w-5 h-5"/>
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
               {isLoadingRoutes ? (
                 <div className="text-center py-6 text-gray-400 flex justify-center items-center">
-                  <Clock className="animate-spin w-5 h-5 mr-2"/> Járatok betöltése...
+                  <Clock className="animate-spin w-5 h-5 mr-2" /> Járatok betöltése...
                 </div>
               ) : (
                 <div className="max-h-72 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
@@ -341,9 +354,9 @@ const renderVehicleBadge = (route, type, color, textColor) => {
         </div>
 
         <h2 className="text-lg font-semibold mb-3 flex items-center">
-          <Clock className="mr-2 w-5 h-5 text-yellow-400"/> Mentett indulások
+          <Clock className="mr-2 w-5 h-5 text-yellow-400" /> Mentett indulások
         </h2>
-        
+
         {favorites.length === 0 ? (
           <div className="text-center text-gray-500 py-8 bg-gray-800 rounded-xl border border-gray-700 border-dashed">
             Keresd meg a megállódat, és adj hozzá járatokat!
@@ -354,7 +367,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
               <div key={fav.id} className="bg-gray-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-yellow-400">
                 <div className="flex-1 pr-2 overflow-hidden">
                   <h3 className="font-bold flex items-center text-base md:text-lg truncate">
-                    <MapPin className="w-4 h-4 mr-1 text-gray-400 flex-shrink-0"/> 
+                    <MapPin className="w-4 h-4 mr-1 text-gray-400 flex-shrink-0" />
                     <span className="truncate">{fav.stopName}</span>
                   </h3>
                   <div className="flex items-center mt-2 overflow-hidden">
@@ -362,7 +375,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
                     <span className="text-sm text-gray-300 line-clamp-1">{fav.headsign} felé</span>
                   </div>
                 </div>
-                
+
                 {/* IDŐPONTOK MEGJELENÍTÉSE */}
                 <div className="flex items-center h-full flex-shrink-0">
                   <div className="flex flex-col items-end mr-3 min-w-[3.5rem]">
@@ -383,7 +396,7 @@ const renderVehicleBadge = (route, type, color, textColor) => {
                       </span>
                     )}
                   </div>
-                  <button 
+                  <button
                     onClick={() => removeFavorite(fav.id)}
                     className="text-red-400 hover:text-red-300 hover:bg-gray-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center"
                   >
