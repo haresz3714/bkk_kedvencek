@@ -3,8 +3,8 @@
 # Weben elérhető:
 ## https://bkk-kedvencek.netlify.app/
 
-# Mentsd el a leggyakrabban használt megállóidat és járataidat az egyszerűbb, gyorsabb menetrendellenőrzés érdekében.
 
+## Mentsd el a leggyakrabban használt megállóidat és járataidat az egyszerűbb, gyorsabb menetrendellenőrzés érdekében.
 Egy modern, gyors és reszponzív webalkalmazás Budapest tömegközlekedési adataihoz, amely valós időben jeleníti meg a kiválasztott megállók indulási idejét, járatait és irányait.
 
 ## ✨ Főbb Funkciók
