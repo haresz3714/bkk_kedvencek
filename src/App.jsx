@@ -1,7 +1,48 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Clock, Plus, Trash2, TramFront, Bus, Train, X } from 'lucide-react';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
+
+function DestinationText({ children, className = '' }) {
+  const containerRef = useRef(null);
+  const textRef = useRef(null);
+  const [overflowDistance, setOverflowDistance] = useState(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const text = textRef.current;
+    if (!container || !text) return;
+
+    const updateOverflow = () => {
+      setOverflowDistance(Math.max(0, text.scrollWidth - container.clientWidth));
+    };
+
+    updateOverflow();
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    resizeObserver.observe(container);
+    resizeObserver.observe(text);
+    return () => resizeObserver.disconnect();
+  }, [children]);
+
+  const scrollStyle = overflowDistance > 0
+    ? {
+        '--destination-shift': `-${overflowDistance}px`,
+        '--destination-duration': `${Math.max(6, overflowDistance / 18)}s`
+      }
+    : undefined;
+
+  return (
+    <span ref={containerRef} className={`min-w-0 flex-1 overflow-hidden ${className}`}>
+      <span
+        ref={textRef}
+        className={`block w-max whitespace-nowrap${overflowDistance > 0 ? ' destination-scroll' : ''}`}
+        style={scrollStyle}
+      >
+        {children}
+      </span>
+    </span>
+  );
+}
 
 export default function App() {
   const [favorites, setFavorites] = useState(() => {
@@ -14,6 +55,11 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [stopResults, setStopResults] = useState([]);
+  const [recentStops, setRecentStops] = useState(() => {
+    const saved = localStorage.getItem('bkk_recent_stops');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [selectedStopName, setSelectedStopName] = useState(null);
   const [routeOptions, setRouteOptions] = useState([]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
@@ -21,6 +67,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('bkk_favorites', JSON.stringify(favorites));
   }, [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem('bkk_recent_stops', JSON.stringify(recentStops));
+  }, [recentStops]);
 
   useEffect(() => {
     const fetchTimes = async () => {
@@ -218,6 +268,19 @@ export default function App() {
     setIsLoadingRoutes(false);
   };
 
+  const selectStop = (stop) => {
+    setRecentStops(currentStops => [
+      stop,
+      ...currentStops.filter(recentStop => recentStop.name !== stop.name)
+    ].slice(0, 5));
+    setIsSearchFocused(false);
+    fetchRoutesForStop(stop.name, stop.stopIds);
+  };
+
+  const removeRecentStop = (stopName) => {
+    setRecentStops(currentStops => currentStops.filter(stop => stop.name !== stopName));
+  };
+
   const handleAddFavorite = (option) => {
     const newFavorite = {
       id: Date.now(),
@@ -307,8 +370,10 @@ export default function App() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Megálló keresése (pl. Széll Kálmán tér)"
-                className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg mb-2 transition-all"
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setIsSearchFocused(false)}
+                placeholder="Megálló keresése..."
+                className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg mb-2 transition-all placeholder:italic"
               />
 
               {stopResults.length > 0 && (
@@ -316,12 +381,38 @@ export default function App() {
                   {stopResults.map(stop => (
                     <button
                       key={stop.name}
-                      onClick={() => fetchRoutesForStop(stop.name, stop.stopIds)}
+                      onClick={() => selectStop(stop)}
                       className="w-full flex items-center p-3 border-b border-zinc-600 hover:bg-zinc-600 transition-colors text-left"
                     >
                       <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
                       <span className="font-bold text-base md:text-lg">{stop.name}</span>
                     </button>
+                  ))}
+                </div>
+              )}
+
+              {isSearchFocused && searchQuery.length === 0 && recentStops.length > 0 && (
+                <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2 animate-in fade-in">
+                  <h3 className="px-3 pt-3 pb-2 text-sm font-semibold text-zinc-300">Legutóbbi megállók</h3>
+                  {recentStops.map(stop => (
+                    <div key={stop.name} className="flex items-center border-t border-zinc-600">
+                      <button
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectStop(stop)}
+                        className="flex-1 flex items-center p-3 hover:bg-zinc-600 transition-colors text-left min-w-0"
+                      >
+                        <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
+                        <span className="font-bold text-base md:text-lg truncate">{stop.name}</span>
+                      </button>
+                      <button
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => removeRecentStop(stop.name)}
+                        aria-label={`${stop.name} törlése az előzményekből`}
+                        className="flex w-12 flex-shrink-0 self-stretch items-center justify-center text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-400"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -350,12 +441,14 @@ export default function App() {
                     <button
                       key={idx}
                       onClick={() => handleAddFavorite(opt)}
-                      className="w-full bg-zinc-700 hover:bg-violet-700 hover:text-white transition-colors p-3 rounded-lg text-left flex flex-col group"
+                      className="w-full bg-zinc-700 hover:bg-violet-700 hover:text-white transition-colors p-3 rounded-lg text-left flex items-center group min-w-0"
                     >
-                      <div className="flex items-center font-bold text-lg mb-1">
+                      <div className="flex items-center font-bold text-lg flex-shrink-0">
                         {renderVehicleBadge(opt.route, opt.type, opt.color, opt.textColor)}
                       </div>
-                      <div className="text-sm opacity-80 ml-8 line-clamp-2">Irány: {opt.headsign}</div>
+                      <DestinationText className="text-sm opacity-80">
+                        Irány: {opt.headsign}
+                      </DestinationText>
                     </button>
                   ))}
                 </div>
@@ -381,9 +474,11 @@ export default function App() {
                     <MapPin className="w-4 h-4 mr-1 text-zinc-400 flex-shrink-0" />
                     <span className="truncate">{fav.stopName}</span>
                   </h3>
-                  <div className="flex items-center mt-2 overflow-hidden">
+                  <div className="flex items-center mt-2 min-w-0 overflow-hidden">
                     {renderVehicleBadge(fav.route, fav.type, fav.color, fav.textColor)}
-                    <span className="text-sm text-zinc-300 line-clamp-1">{fav.headsign} felé</span>
+                    <DestinationText className="text-sm text-zinc-300">
+                      {fav.headsign} felé
+                    </DestinationText>
                   </div>
                 </div>
 
