@@ -49,6 +49,11 @@ export default function App() {
     const saved = localStorage.getItem('bkk_favorites');
     return saved ? JSON.parse(saved) : [];
   });
+  const [favoriteDrag, setFavoriteDrag] = useState(null);
+  const favoritesListRef = useRef(null);
+  const favoritePressRef = useRef(null);
+  const favoriteTouchPressRef = useRef(null);
+  const favoriteTouchDragRef = useRef(null);
 
   // Most már tömböket (több időpontot) tárolunk egy-egy járathoz
   const [liveTimes, setLiveTimes] = useState({});
@@ -307,6 +312,201 @@ export default function App() {
     setFavorites(favorites.filter(fav => fav.id !== id));
   };
 
+  const cancelFavoritePress = () => {
+    if (favoritePressRef.current) {
+      clearTimeout(favoritePressRef.current.timeoutId);
+      favoritePressRef.current = null;
+    }
+  };
+
+  const createFavoriteDrag = (favorite, index, currentTarget, x, y) => {
+    const card = currentTarget.getBoundingClientRect();
+    const list = favoritesListRef.current;
+    if (!list) return null;
+
+    const otherCenters = Array.from(list.querySelectorAll('[data-favorite-slot]'))
+      .filter(slot => slot.dataset.favoriteId !== String(favorite.id))
+      .map(slot => {
+        const bounds = slot.getBoundingClientRect();
+        return bounds.top + bounds.height / 2;
+      });
+
+    return {
+      id: favorite.id,
+      x,
+      y,
+      offsetX: x - card.left,
+      offsetY: y - card.top,
+      width: card.width,
+      height: card.height,
+      originalIndex: index,
+      targetIndex: index,
+      otherCenters,
+      step: card.height + (parseFloat(getComputedStyle(list).rowGap) || 12)
+    };
+  };
+
+  const handleFavoritePointerDown = (event, favorite, index) => {
+    if (event.pointerType === 'touch' || event.button !== 0 || event.target.closest('button')) return;
+
+    cancelFavoritePress();
+    const { clientX, clientY, currentTarget, pointerId } = event;
+    const timeoutId = setTimeout(() => {
+      const drag = createFavoriteDrag(favorite, index, currentTarget, clientX, clientY);
+      if (!drag) return;
+      setFavoriteDrag({
+        ...drag,
+        pointerId,
+      });
+      currentTarget.setPointerCapture(pointerId);
+    }, 1000);
+
+    favoritePressRef.current = {
+      pointerId,
+      x: clientX,
+      y: clientY,
+      timeoutId
+    };
+  };
+
+  const cancelFavoriteTouchPress = () => {
+    const press = favoriteTouchPressRef.current;
+    if (!press) return;
+
+    clearTimeout(press.timeoutId);
+    document.removeEventListener('touchmove', press.handleMove);
+    document.removeEventListener('touchend', press.handleEnd);
+    document.removeEventListener('touchcancel', press.handleCancel);
+    favoriteTouchPressRef.current = null;
+    favoriteTouchDragRef.current = null;
+  };
+
+  const handleFavoriteTouchStart = (event, favorite, index) => {
+    if (event.target.closest('button') || event.touches.length !== 1) return;
+
+    cancelFavoriteTouchPress();
+    const touch = event.touches[0];
+    const currentTarget = event.currentTarget;
+    const handleEnd = (endEvent) => finishFavoriteTouch(endEvent, true);
+    const handleCancel = (cancelEvent) => finishFavoriteTouch(cancelEvent, false);
+    const handleMove = (moveEvent) => {
+      const activeTouch = Array.from(moveEvent.touches)
+        .find(item => item.identifier === touch.identifier);
+      if (!activeTouch) return;
+
+      const drag = favoriteTouchDragRef.current;
+      if (!drag) {
+        if (Math.hypot(activeTouch.clientX - touch.clientX, activeTouch.clientY - touch.clientY) > 8) {
+          cancelFavoriteTouchPress();
+        }
+        return;
+      }
+
+      moveEvent.preventDefault();
+      const targetIndex = drag.otherCenters.filter(center => activeTouch.clientY > center).length;
+      favoriteTouchDragRef.current = {
+        ...drag,
+        x: activeTouch.clientX,
+        y: activeTouch.clientY,
+        targetIndex
+      };
+      setFavoriteDrag(current => current && ({
+        ...current,
+        x: activeTouch.clientX,
+        y: activeTouch.clientY,
+        targetIndex
+      }));
+    };
+    const timeoutId = setTimeout(() => {
+      const drag = createFavoriteDrag(
+        favorite,
+        index,
+        currentTarget,
+        touch.clientX,
+        touch.clientY
+      );
+      if (!drag) {
+        cancelFavoriteTouchPress();
+        return;
+      }
+
+      favoriteTouchDragRef.current = drag;
+      setFavoriteDrag(drag);
+    }, 1000);
+
+    favoriteTouchPressRef.current = {
+      touchId: touch.identifier,
+      timeoutId,
+      handleMove,
+      handleEnd,
+      handleCancel
+    };
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
+    document.addEventListener('touchcancel', handleCancel);
+  };
+
+  const finishFavoriteTouch = (event, shouldReorder) => {
+    const press = favoriteTouchPressRef.current;
+    const touch = Array.from(event.changedTouches)
+      .find(item => item.identifier === press?.touchId);
+    if (!press || !touch) return;
+
+    const drag = favoriteTouchDragRef.current;
+    cancelFavoriteTouchPress();
+    if (shouldReorder && drag) {
+      setFavorites(current => {
+        const fromIndex = current.findIndex(favorite => favorite.id === drag.id);
+        if (fromIndex < 0) return current;
+
+        const reordered = [...current];
+        const [movingFavorite] = reordered.splice(fromIndex, 1);
+        reordered.splice(drag.targetIndex, 0, movingFavorite);
+        return reordered;
+      });
+    }
+    setFavoriteDrag(null);
+  };
+
+  const handleFavoritePointerMove = (event) => {
+    const press = favoritePressRef.current;
+    if (press && press.pointerId === event.pointerId && !favoriteDrag) {
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) {
+        cancelFavoritePress();
+      }
+      return;
+    }
+
+    if (!favoriteDrag || favoriteDrag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const targetIndex = favoriteDrag.otherCenters.filter(center => event.clientY > center).length;
+    setFavoriteDrag(current => current && ({
+      ...current,
+      x: event.clientX,
+      y: event.clientY,
+      targetIndex
+    }));
+  };
+
+  const finishFavoriteDrag = (event, shouldReorder) => {
+    cancelFavoritePress();
+    if (!favoriteDrag || favoriteDrag.pointerId !== event.pointerId) return;
+
+    if (shouldReorder) {
+      setFavorites(current => {
+        const fromIndex = current.findIndex(favorite => favorite.id === favoriteDrag.id);
+        if (fromIndex < 0) return current;
+
+        const reordered = [...current];
+        const [movingFavorite] = reordered.splice(fromIndex, 1);
+        reordered.splice(favoriteDrag.targetIndex, 0, movingFavorite);
+        return reordered;
+      });
+    }
+    setFavoriteDrag(null);
+  };
+
   const renderVehicleBadge = (route, type, color, textColor) => {
     let bgColor = color ? `#${color}` : '#009FE3';
     let txtColor = textColor ? `#${textColor}` : '#FFFFFF';
@@ -460,57 +660,103 @@ export default function App() {
         <h2 className="text-lg font-semibold mb-3 flex items-center">
           <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
         </h2>
+        <p className="-mt-2 mb-3 text-xs text-zinc-500">
+          Átrendezéshez tartsd lenyomva a kártyát 1 másodpercig, majd húzd a helyére.
+        </p>
 
         {favorites.length === 0 ? (
           <div className="text-center text-zinc-500 py-8 bg-zinc-800 rounded-xl border border-zinc-700 border-dashed">
             Keresd meg a megállódat, és adj hozzá járatokat!
           </div>
         ) : (
-          <div className="space-y-3">
-            {favorites.map((fav) => (
-              <div key={fav.id} className="bg-zinc-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-violet-400">
-                <div className="flex-1 pr-2 overflow-hidden">
-                  <h3 className="font-bold flex items-center text-base md:text-lg truncate">
-                    <MapPin className="w-4 h-4 mr-1 text-zinc-400 flex-shrink-0" />
-                    <span className="truncate">{fav.stopName}</span>
-                  </h3>
-                  <div className="flex items-center mt-2 min-w-0 overflow-hidden">
-                    {renderVehicleBadge(fav.route, fav.type, fav.color, fav.textColor)}
-                    <DestinationText className="text-sm text-zinc-300">
-                      {fav.headsign} felé
-                    </DestinationText>
-                  </div>
-                </div>
+          <div ref={favoritesListRef} className="space-y-3">
+            {favorites.map((fav, index) => {
+              const isDragging = favoriteDrag?.id === fav.id;
+              let shift = 0;
+              if (favoriteDrag && !isDragging) {
+                if (favoriteDrag.targetIndex < favoriteDrag.originalIndex &&
+                    index >= favoriteDrag.targetIndex && index < favoriteDrag.originalIndex) {
+                  shift = favoriteDrag.step;
+                } else if (favoriteDrag.targetIndex > favoriteDrag.originalIndex &&
+                    index > favoriteDrag.originalIndex && index <= favoriteDrag.targetIndex) {
+                  shift = -favoriteDrag.step;
+                }
+              }
 
-                {/* IDŐPONTOK MEGJELENÍTÉSE */}
-                <div className="flex items-center h-full flex-shrink-0">
-                  <div className="flex flex-col items-end mr-3 min-w-[3.5rem]">
-                    {liveTimes[fav.id] && liveTimes[fav.id][0] !== 'Nincs adat' ? (
-                      <>
-                        <span className="text-3xl font-bold text-green-400 leading-none">
-                          {liveTimes[fav.id][0]}
-                        </span>
-                        {liveTimes[fav.id].length > 1 && (
-                          <span className="text-xs font-semibold text-zinc-400 mt-1 whitespace-nowrap">
-                            majd: {liveTimes[fav.id].slice(1).join(', ')}
+              return (
+                <div
+                  key={fav.id}
+                  data-favorite-slot
+                  data-favorite-id={fav.id}
+                  className="transition-transform duration-200 ease-out"
+                  style={{
+                    ...(shift ? { transform: `translateY(${shift}px)` } : {}),
+                    ...(isDragging ? { minHeight: favoriteDrag.height } : {})
+                  }}
+                >
+                  <div
+                    onPointerDown={(event) => handleFavoritePointerDown(event, fav, index)}
+                    onPointerMove={handleFavoritePointerMove}
+                    onPointerUp={(event) => finishFavoriteDrag(event, true)}
+                    onPointerCancel={(event) => finishFavoriteDrag(event, false)}
+                    onTouchStart={(event) => handleFavoriteTouchStart(event, fav, index)}
+                    className={`bg-zinc-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-violet-400 select-none ${
+                      isDragging
+                        ? 'fixed z-50 cursor-grabbing scale-[1.02] shadow-2xl ring-2 ring-violet-300'
+                        : 'cursor-grab'
+                    }`}
+                    style={isDragging ? {
+                      left: favoriteDrag.x - favoriteDrag.offsetX,
+                      top: favoriteDrag.y - favoriteDrag.offsetY,
+                      width: favoriteDrag.width,
+                      height: favoriteDrag.height,
+                      touchAction: 'none'
+                    } : undefined}
+                  >
+                    <div className="flex-1 pr-2 overflow-hidden">
+                      <h3 className="font-bold flex items-center text-base md:text-lg truncate">
+                        <MapPin className="w-4 h-4 mr-1 text-zinc-400 flex-shrink-0" />
+                        <span className="truncate">{fav.stopName}</span>
+                      </h3>
+                      <div className="flex items-center mt-2 min-w-0 overflow-hidden">
+                        {renderVehicleBadge(fav.route, fav.type, fav.color, fav.textColor)}
+                        <DestinationText className="text-sm text-zinc-300">
+                          {fav.headsign} felé
+                        </DestinationText>
+                      </div>
+                    </div>
+
+                    {/* IDŐPONTOK MEGJELENÍTÉSE */}
+                    <div className="flex items-center h-full flex-shrink-0">
+                      <div className="flex flex-col items-end mr-3 min-w-[3.5rem]">
+                        {liveTimes[fav.id] && liveTimes[fav.id][0] !== 'Nincs adat' ? (
+                          <>
+                            <span className="text-3xl font-bold text-green-400 leading-none">
+                              {liveTimes[fav.id][0]}
+                            </span>
+                            {liveTimes[fav.id].length > 1 && (
+                              <span className="text-xs font-semibold text-zinc-400 mt-1 whitespace-nowrap">
+                                majd: {liveTimes[fav.id].slice(1).join(', ')}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-lg font-bold text-zinc-500">
+                            {liveTimes[fav.id] ? liveTimes[fav.id][0] : '...'}
                           </span>
                         )}
-                      </>
-                    ) : (
-                      <span className="text-lg font-bold text-zinc-500">
-                        {liveTimes[fav.id] ? liveTimes[fav.id][0] : '...'}
-                      </span>
-                    )}
+                      </div>
+                      <button
+                        onClick={() => removeFavorite(fav.id)}
+                        className="text-red-400 hover:text-red-300 hover:bg-zinc-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => removeFavorite(fav.id)}
-                    className="text-red-400 hover:text-red-300 hover:bg-zinc-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         <p className="mt-3 text-center text-xs italic text-zinc-500">
