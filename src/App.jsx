@@ -1,8 +1,205 @@
 import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, MapPin, Clock, Trash2, TramFront, Bus, X, Sun, Moon } from 'lucide-react';
+import { Search, MapPin, Clock, Trash2, TramFront, Bus, X, Sun, Moon, Bell, ChevronDown, RefreshCw } from 'lucide-react';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
+const ALERT_FILTERS = [
+  { id: 'metro', label: 'Metró' },
+  { id: 'tram', label: 'Villamos' },
+  { id: 'bus', label: 'Busz' },
+  { id: 'hev', label: 'HÉV' },
+  { id: 'trolley', label: 'Troli' },
+  { id: 'night', label: 'Éjszakai' },
+  { id: 'other', label: 'Egyéb' }
+];
+
+const getTranslatedAlertText = (value) =>
+  value?.translations?.hu || value?.translations?.en || value?.someTranslation || '';
+
+function getAlertCategories(alert) {
+  const categories = new Set();
+  const routes = alert.routes || [];
+
+  routes.forEach(routeAlert => {
+    const route = routeAlert.route || {};
+    const name = String(route.shortName || route.routeShortName || '').trim();
+    const type = route.type;
+
+    if (type === 'SUBWAY' || /^M[1-4]$/i.test(name)) categories.add('metro');
+    else if (type === 'TRAM') categories.add('tram');
+    else if (
+      type === 'SUBURBAN_RAILWAY' ||
+      /^H[5-9]$/i.test(name)
+    ) categories.add('hev');
+    else if (type === 'TROLLEYBUS') categories.add('trolley');
+    else if (type === 'BUS') categories.add(/^9\d{2}[A-Z]?$/i.test(name) ? 'night' : 'bus');
+    else if (type) categories.add('other');
+  });
+
+  if (categories.size === 0) {
+    (alert.vehicleRouteTypes || []).forEach(type => {
+      if (type === 'SUBWAY') categories.add('metro');
+      else if (type === 'TRAM') categories.add('tram');
+      else if (type === 'SUBURBAN_RAILWAY') categories.add('hev');
+      else if (type === 'TROLLEYBUS') categories.add('trolley');
+      else if (type === 'BUS') categories.add('bus');
+      else categories.add('other');
+    });
+  }
+
+  if (categories.size === 0) categories.add('other');
+  return categories;
+}
+
+function normalizeAlertText(value) {
+  const html = getTranslatedAlertText(value)
+    .replace(/<br\s*\/?>|<\/(div|p|li|ul|ol)>/gi, ' ');
+  return new DOMParser()
+    .parseFromString(html, 'text/html')
+    .body.textContent
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('hu');
+}
+
+function groupTrafficAlerts(alerts) {
+  const groups = new Map();
+
+  alerts.forEach(alert => {
+    const routes = (alert.routes || [])
+      .map(route => [
+        route.routeId,
+        route.effectType,
+        normalizeAlertText(route.affectedEntityDescription),
+        normalizeAlertText(route.header)
+      ])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    const contentKey = JSON.stringify([
+      normalizeAlertText(alert.header),
+      normalizeAlertText(alert.description),
+      routes
+    ]);
+    const period = {
+      start: alert.start,
+      end: alert.end,
+      endText: alert.endText
+    };
+    let group = groups.get(contentKey);
+
+    if (!group) {
+      group = { ...alert, groupKey: contentKey, occurrences: [] };
+      groups.set(contentKey, group);
+    }
+
+    const periodKey = JSON.stringify([
+      period.start || null,
+      period.end || null,
+      normalizeAlertText(period.endText)
+    ]);
+    if (!group.occurrences.some(existing => existing.key === periodKey)) {
+      group.occurrences.push({ ...period, key: periodKey });
+    }
+  });
+
+  return Array.from(groups.values()).map(group => ({
+    ...group,
+    occurrences: group.occurrences.sort((a, b) => (a.start || 0) - (b.start || 0))
+  }));
+}
+
+function groupAlertPeriods(occurrences) {
+  const groups = new Map();
+  const standalone = [];
+
+  occurrences.forEach(period => {
+    if (!period.start || !period.end) {
+      standalone.push({ ...period, count: 1 });
+      return;
+    }
+
+    const start = new Date(period.start * 1000);
+    const end = new Date(period.end * 1000);
+    const startDay = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()) / 86400000;
+    const endDay = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) / 86400000;
+    const signature = [
+      start.getHours(), start.getMinutes(),
+      end.getHours(), end.getMinutes(),
+      endDay - startDay,
+      normalizeAlertText(period.endText)
+    ].join(':');
+    const group = groups.get(signature) || [];
+    group.push({ ...period, startDay, signature });
+    groups.set(signature, group);
+  });
+
+  const grouped = [];
+  groups.forEach(periods => {
+    periods.sort((a, b) => a.startDay - b.startDay);
+    let run = [];
+
+    const saveRun = () => {
+      if (run.length === 0) return;
+      grouped.push({
+        ...run[0],
+        end: run[run.length - 1].end,
+        count: run.length
+      });
+      run = [];
+    };
+
+    periods.forEach(period => {
+      if (run.length > 0 && period.startDay !== run[run.length - 1].startDay + 1) {
+        saveRun();
+      }
+      run.push(period);
+    });
+    saveRun();
+  });
+
+  return [...grouped, ...standalone].sort((a, b) => (a.start || 0) - (b.start || 0));
+}
+
+function sanitizeAlertHtml(html) {
+  const parsed = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  const allowedTags = new Set(['A', 'B', 'BR', 'DIV', 'EM', 'I', 'LI', 'OL', 'P', 'SMALL', 'SPAN', 'STRONG', 'U', 'UL']);
+  const removedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'TEMPLATE']);
+
+  const sanitizeNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent || '');
+    if (node.nodeType !== Node.ELEMENT_NODE) return document.createDocumentFragment();
+
+    const element = node;
+    if (removedTags.has(element.tagName)) return document.createDocumentFragment();
+
+    const children = document.createDocumentFragment();
+    element.childNodes.forEach(child => children.appendChild(sanitizeNode(child)));
+    if (!allowedTags.has(element.tagName)) return children;
+
+    const safeElement = document.createElement(element.tagName.toLowerCase());
+    if (element.tagName === 'A') {
+      safeElement.className = 'text-violet-300 underline underline-offset-2';
+      const href = element.getAttribute('href');
+      if (href) {
+        try {
+          const url = new URL(href, window.location.origin);
+          if (url.protocol === 'https:' || url.protocol === 'http:') {
+            safeElement.setAttribute('href', url.href);
+            safeElement.setAttribute('target', '_blank');
+            safeElement.setAttribute('rel', 'noopener noreferrer');
+          }
+        } catch {
+          // Leave invalid links as plain text.
+        }
+      }
+    }
+    safeElement.appendChild(children);
+    return safeElement;
+  };
+
+  const container = document.createElement('div');
+  parsed.body.childNodes.forEach(node => container.appendChild(sanitizeNode(node)));
+  return container.innerHTML;
+}
 
 function DestinationText({ children, className = '' }) {
   const containerRef = useRef(null);
@@ -77,6 +274,12 @@ export default function App() {
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [searchPanelMinHeight, setSearchPanelMinHeight] = useState(null);
   const searchRoutePanelRef = useRef(null);
+  const [showTrafficChanges, setShowTrafficChanges] = useState(false);
+  const [trafficAlerts, setTrafficAlerts] = useState([]);
+  const [isLoadingTrafficAlerts, setIsLoadingTrafficAlerts] = useState(false);
+  const [trafficAlertsError, setTrafficAlertsError] = useState(null);
+  const [trafficAlertsRefreshKey, setTrafficAlertsRefreshKey] = useState(0);
+  const [selectedAlertFilters, setSelectedAlertFilters] = useState(() => new Set());
 
   const transitionSearchPanel = (update) => {
     if (typeof document.startViewTransition !== 'function') {
@@ -99,6 +302,63 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('bkk_recent_stops', JSON.stringify(recentStops));
   }, [recentStops]);
+
+  useEffect(() => {
+    if (!showTrafficChanges) return;
+
+    if (!API_KEY || API_KEY === 'A_TE_API_KULCSOD') return;
+
+    const controller = new AbortController();
+    const fetchTrafficAlerts = async () => {
+      try {
+        const params = new URLSearchParams({
+          key: API_KEY,
+          filterClosed: 'true',
+          listView: 'true',
+          includeReferences: 'alerts,routes'
+        });
+        const response = await fetch(
+          `https://go.bkk.hu/api/query/v1/ws/otp/api/where/alert-search.json?${params}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const result = await response.json();
+        if (result.code !== 200 || !result.data) {
+          throw new Error(result.text || 'Érvénytelen API-válasz');
+        }
+
+        const alertReferences = result.data.references?.alerts || {};
+        const routeReferences = result.data.references?.routes || {};
+        const alertIds = result.data.entry?.alertIds || [];
+        const alerts = Array.isArray(alertReferences)
+          ? alertReferences
+          : alertIds.length > 0
+            ? alertIds.map(id => alertReferences[id]).filter(Boolean)
+            : Object.values(alertReferences);
+        const uniqueAlerts = Array.from(
+          new Map(alerts.filter(alert => alert?.id).map(alert => [alert.id, alert])).values()
+        ).map(alert => ({
+          ...alert,
+          routes: (alert.routes || []).map(alertRoute => ({
+            ...alertRoute,
+            route: routeReferences[alertRoute.routeId]
+          }))
+        }));
+
+        setTrafficAlerts(groupTrafficAlerts(uniqueAlerts));
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        console.error('Forgalmi változások lekérési hiba:', error);
+        setTrafficAlertsError('Nem sikerült betölteni a forgalmi változásokat. Próbáld újra később.');
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingTrafficAlerts(false);
+      }
+    };
+
+    fetchTrafficAlerts();
+    return () => controller.abort();
+  }, [showTrafficChanges, trafficAlertsRefreshKey]);
 
   useEffect(() => {
     const fetchTimes = async () => {
@@ -714,6 +974,56 @@ export default function App() {
     );
   };
 
+  const formatAlertDate = (timestamp) => {
+    if (!timestamp) return '';
+    return new Intl.DateTimeFormat('hu-HU', {
+      month: 'short',
+      day: 'numeric'
+    }).format(new Date(timestamp * 1000));
+  };
+
+  const formatAlertClock = (timestamp) => {
+    if (!timestamp) return '';
+    return new Intl.DateTimeFormat('hu-HU', {
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(new Date(timestamp * 1000));
+  };
+
+  const toggleTrafficChanges = () => {
+    if (showTrafficChanges) {
+      setIsLoadingTrafficAlerts(false);
+      setShowTrafficChanges(false);
+      return;
+    }
+
+    if (API_KEY && API_KEY !== 'A_TE_API_KULCSOD') {
+      setIsLoadingTrafficAlerts(true);
+      setTrafficAlertsError(null);
+    }
+    setShowTrafficChanges(true);
+  };
+
+  const refreshTrafficAlerts = () => {
+    setIsLoadingTrafficAlerts(true);
+    setTrafficAlertsError(null);
+    setTrafficAlertsRefreshKey(key => key + 1);
+  };
+
+  const toggleAlertFilter = (filterId) => {
+    setSelectedAlertFilters(current => {
+      const next = new Set(current);
+      if (next.has(filterId)) next.delete(filterId);
+      else next.add(filterId);
+      return next;
+    });
+  };
+
+  const visibleTrafficAlerts = trafficAlerts.filter(alert =>
+    Array.from(getAlertCategories(alert)).some(category => selectedAlertFilters.has(category))
+  );
+  const hasSelectedAlertFilters = selectedAlertFilters.size > 0;
+
   return (
     <div data-theme={theme} className="app-shell min-h-screen bg-zinc-900 text-white p-4 font-sans pb-20 flex flex-col">
       <div className="max-w-md mx-auto w-full flex-1">
@@ -871,7 +1181,7 @@ export default function App() {
           <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
         </h2>
         <p className="-mt-2 mb-3 text-xs text-zinc-500">
-          Számítógépen húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
+          Sorrend átrendezése: Számítógépen fogd meg húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
         </p>
 
         {favorites.length === 0 ? (
@@ -984,6 +1294,201 @@ export default function App() {
         <p className="mt-3 text-center text-xs italic text-zinc-500">
           A valós végállomások a feltüntetettektől eltérhetnek.
         </p>
+
+        <section className="traffic-changes-section mt-6 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-800 shadow-lg">
+          <div className="traffic-changes-header flex items-center">
+            <button
+              type="button"
+              onClick={toggleTrafficChanges}
+              aria-expanded={showTrafficChanges}
+              aria-controls="traffic-changes-panel"
+              className={`traffic-changes-toggle flex min-h-14 flex-1 items-center gap-3 p-4 text-left font-semibold focus-visible:outline-none ${
+                showTrafficChanges ? 'rounded-t-xl' : 'rounded-xl'
+              }`}
+            >
+              <Bell className="h-5 w-5 flex-shrink-0 text-violet-300" />
+              <span className="flex-1">Forgalmi változások</span>
+              {trafficAlerts.length > 0 && (
+                <span className="traffic-alert-count rounded-full px-2 py-0.5 text-xs font-bold">
+                  {trafficAlerts.length}
+                </span>
+              )}
+              <ChevronDown
+                className={`h-5 w-5 text-zinc-400 transition-transform ${showTrafficChanges ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {showTrafficChanges && (
+              <button
+                type="button"
+                onClick={refreshTrafficAlerts}
+                disabled={isLoadingTrafficAlerts}
+                aria-label="Forgalmi változások frissítése"
+                title="Frissítés"
+                className="mr-3 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoadingTrafficAlerts ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+          </div>
+
+          <div
+            id="traffic-changes-panel"
+            className={`traffic-changes-panel${showTrafficChanges ? ' is-open' : ''}`}
+            aria-hidden={!showTrafficChanges}
+            inert={!showTrafficChanges}
+          >
+            <div className={`traffic-changes-panel-content border-zinc-700${showTrafficChanges ? ' is-open' : ''}`}>
+              <div className="traffic-alert-filters" role="group" aria-label="Forgalmi változások szűrése">
+                {ALERT_FILTERS.map(filter => {
+                  const isSelected = selectedAlertFilters.has(filter.id);
+                  return (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => toggleAlertFilter(filter.id)}
+                      className={`traffic-alert-filter rounded-full border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
+                        isSelected
+                          ? 'border-violet-400 bg-violet-700 text-white'
+                          : 'border-zinc-600 bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(!API_KEY || API_KEY === 'A_TE_API_KULCSOD') && (
+                <p className="mt-3 text-sm text-red-400" role="alert">
+                  A forgalmi változások betöltéséhez állítsd be a BKK API-kulcsot.
+                </p>
+              )}
+              {trafficAlertsError && (
+                <div className="mt-3 text-center">
+                  <p className="text-sm text-red-400" role="alert">{trafficAlertsError}</p>
+                  <button
+                    type="button"
+                    onClick={refreshTrafficAlerts}
+                    className="mt-2 rounded-lg bg-zinc-700 px-4 py-2 text-sm font-semibold transition-colors hover:bg-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                  >
+                    Újrapróbálás
+                  </button>
+                </div>
+              )}
+
+              <div
+                className={`traffic-alert-results${hasSelectedAlertFilters ? ' is-open' : ''}`}
+                aria-hidden={!hasSelectedAlertFilters}
+                inert={!hasSelectedAlertFilters}
+              >
+                <div className="traffic-alert-results-content">
+                  {hasSelectedAlertFilters && isLoadingTrafficAlerts ? (
+                    <p className="flex items-center justify-center py-4 text-sm text-zinc-400" role="status">
+                      <Clock className="mr-2 h-4 w-4 animate-spin" /> Forgalmi változások betöltése...
+                    </p>
+                  ) : hasSelectedAlertFilters && (!API_KEY || API_KEY === 'A_TE_API_KULCSOD' || trafficAlertsError) ? null : trafficAlerts.length === 0 ? (
+                    <p className="py-3 text-center text-sm text-zinc-400">
+                      Jelenleg nincs megjeleníthető aktív forgalmi változás.
+                    </p>
+                  ) : hasSelectedAlertFilters && visibleTrafficAlerts.length === 0 ? (
+                    <p className="py-3 text-center text-sm text-zinc-400">
+                      Nincs találat a kiválasztott szűrőkre.
+                    </p>
+                  ) : hasSelectedAlertFilters && (
+                    <ul className="space-y-3">
+                      {visibleTrafficAlerts.map(alert => {
+                    const header = getTranslatedAlertText(alert.header);
+                    const description = getTranslatedAlertText(alert.description);
+                    const affectedRoutes = Array.from(
+                      new Map((alert.routes || []).map(route => [route.routeId, route])).values()
+                    );
+                    return (
+                      <li key={alert.groupKey} className="traffic-alert-card rounded-lg border border-zinc-600 bg-zinc-700 p-3">
+                        <div
+                          className="font-semibold text-violet-300"
+                          dangerouslySetInnerHTML={{
+                            __html: sanitizeAlertHtml(header || 'Forgalmi változás')
+                          }}
+                        />
+                        {affectedRoutes.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-x-2 gap-y-2">
+                            {affectedRoutes.map(routeAlert => {
+                              const route = routeAlert.route || {};
+                              const routeName = route.shortName || route.routeShortName || routeAlert.routeId;
+                              const routeDescription =
+                                getTranslatedAlertText(routeAlert.affectedEntityDescription) ||
+                                getTranslatedAlertText(routeAlert.header);
+
+                              return (
+                                <div
+                                  key={`${alert.id}-${routeAlert.routeId}`}
+                                  className="traffic-alert-route flex max-w-full items-center rounded-md bg-zinc-800/70 px-2 py-1"
+                                >
+                                  {renderVehicleBadge(routeName, route.type, route.color, route.textColor)}
+                                  {routeDescription && (
+                                    <span
+                                      className="min-w-0 text-sm text-zinc-300"
+                                      dangerouslySetInnerHTML={{
+                                        __html: sanitizeAlertHtml(routeDescription)
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {description && (
+                          <div
+                            className="mt-2 text-sm leading-relaxed text-zinc-200 [&_li]:ml-5 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:my-2"
+                            dangerouslySetInnerHTML={{ __html: sanitizeAlertHtml(description) }}
+                          />
+                        )}
+                        {alert.occurrences.some(period =>
+                          period.start || period.end || getTranslatedAlertText(period.endText)
+                        ) && (
+                          <div className="mt-3 border-t border-zinc-600 pt-2 text-sm text-zinc-300">
+                            <p className="mb-1 font-semibold text-zinc-200">Érvényesség</p>
+                            <ul className="space-y-1">
+                              {groupAlertPeriods(alert.occurrences).map(period => {
+                                const startDate = formatAlertDate(period.start);
+                                const endDate = formatAlertDate(period.end);
+                                const startTime = formatAlertClock(period.start);
+                                const endTime = formatAlertClock(period.end);
+                                const endText = getTranslatedAlertText(period.endText);
+
+                                return (
+                                  <li key={period.key} className="flex items-start gap-2">
+                                    <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-violet-300" />
+                                    {period.count > 1 ? (
+                                      <span>
+                                        {startDate} – {endDate}
+                                        {startTime && endTime && <> · naponta {startTime}–{endTime}</>}
+                                      </span>
+                                    ) : startDate && startTime && endDate && endTime ? (
+                                      <span>{startDate} {startTime} – {endDate} {endTime}</span>
+                                    ) : endText ? (
+                                      <span dangerouslySetInnerHTML={{ __html: sanitizeAlertHtml(endText) }} />
+                                    ) : (
+                                      <span>{startDate || startTime || endDate || endTime}</span>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        )}
+                      </li>
+                    );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
       <footer className="mt-8 text-center text-sm text-zinc-400">
         <p>
