@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, MapPin, Clock, Plus, Trash2, TramFront, Bus, Train, X, Sun, Moon } from 'lucide-react';
+import { Search, MapPin, Clock, Trash2, TramFront, Bus, X, Sun, Moon } from 'lucide-react';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 
@@ -79,12 +79,12 @@ export default function App() {
   const searchRoutePanelRef = useRef(null);
 
   const transitionSearchPanel = (update) => {
-    if (typeof document.startViewTransition === 'function') {
-      return document.startViewTransition(() => flushSync(update));
-    } else {
+    if (typeof document.startViewTransition !== 'function') {
       update();
       return null;
     }
+
+    return document.startViewTransition(() => flushSync(update));
   };
 
   useEffect(() => {
@@ -165,6 +165,8 @@ export default function App() {
 
         return matchingRides;
       };
+      const getRideTime = ride =>
+        ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
 
       const stopDataByName = new Map();
       const favoritesToMigrate = new Map();
@@ -237,17 +239,10 @@ export default function App() {
             });
           }
 
-          matchingRides.sort((a, b) => {
-            const timeA = a.predictedDepartureTime || a.predictedArrivalTime || a.departureTime || a.arrivalTime;
-            const timeB = b.predictedDepartureTime || b.predictedArrivalTime || b.departureTime || b.arrivalTime;
-            return timeA - timeB;
-          });
+          matchingRides.sort((a, b) => getRideTime(a) - getRideTime(b));
 
           const validTimes = matchingRides
-            .map(ride => {
-              const timeInEpoch = ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
-              return Math.round((timeInEpoch - nowInSeconds) / 60);
-            })
+            .map(ride => Math.round((getRideTime(ride) - nowInSeconds) / 60))
             .filter(mins => mins > -2);
 
           const formattedTimes = validTimes.map(mins => mins <= 0 ? 'Most' : `${mins}'`);
@@ -291,10 +286,11 @@ export default function App() {
 
           stopIds.forEach(id => {
             const stop = stopsRef[id];
-            if (stop && stop.name) {
-              if (!stopsMap.has(stop.name)) stopsMap.set(stop.name, []);
-              stopsMap.get(stop.name).push(stop.id);
-            }
+            if (!stop?.name) return;
+
+            const ids = stopsMap.get(stop.name) || [];
+            ids.push(stop.id);
+            stopsMap.set(stop.name, ids);
           });
 
           const grouped = Array.from(stopsMap.entries()).map(([name, ids]) => ({ name, stopIds: ids }));
@@ -873,16 +869,18 @@ export default function App() {
           <div ref={favoritesListRef} className="space-y-3">
             {favorites.map((fav, index) => {
               const isDragging = favoriteDrag?.id === fav.id;
-              let shift = 0;
-              if (favoriteDrag && !isDragging) {
-                if (favoriteDrag.targetIndex < favoriteDrag.originalIndex &&
-                    index >= favoriteDrag.targetIndex && index < favoriteDrag.originalIndex) {
-                  shift = favoriteDrag.step;
-                } else if (favoriteDrag.targetIndex > favoriteDrag.originalIndex &&
-                    index > favoriteDrag.originalIndex && index <= favoriteDrag.targetIndex) {
-                  shift = -favoriteDrag.step;
-                }
-              }
+              const movesDown = favoriteDrag &&
+                favoriteDrag.targetIndex < favoriteDrag.originalIndex &&
+                index >= favoriteDrag.targetIndex &&
+                index < favoriteDrag.originalIndex;
+              const movesUp = favoriteDrag &&
+                favoriteDrag.targetIndex > favoriteDrag.originalIndex &&
+                index > favoriteDrag.originalIndex &&
+                index <= favoriteDrag.targetIndex;
+              const shift = !isDragging && movesDown
+                ? favoriteDrag.step
+                : !isDragging && movesUp ? -favoriteDrag.step : 0;
+              const times = liveTimes[fav.id];
 
               return (
                 <div
@@ -938,20 +936,20 @@ export default function App() {
                     {/* IDŐPONTOK MEGJELENÍTÉSE */}
                     <div className="flex items-center h-full flex-shrink-0">
                       <div className="flex flex-col items-end mr-3 min-w-[3.5rem]">
-                        {liveTimes[fav.id] && liveTimes[fav.id][0] !== 'Nincs adat' ? (
+                        {times && times[0] !== 'Nincs adat' ? (
                           <>
                             <span className="text-3xl font-bold text-green-400 leading-none">
-                              {liveTimes[fav.id][0]}
+                              {times[0]}
                             </span>
-                            {liveTimes[fav.id].length > 1 && (
+                            {times.length > 1 && (
                               <span className="text-xs font-semibold text-zinc-400 mt-1 whitespace-nowrap">
-                                majd: {liveTimes[fav.id].slice(1).join(', ')}
+                                majd: {times.slice(1).join(', ')}
                               </span>
                             )}
                           </>
                         ) : (
                           <span className="text-lg font-bold text-zinc-500">
-                            {liveTimes[fav.id] ? liveTimes[fav.id][0] : '...'}
+                            {times ? times[0] : '...'}
                           </span>
                         )}
                       </div>
