@@ -51,6 +51,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [favoriteDrag, setFavoriteDrag] = useState(null);
+  const [enteringFavoriteIds, setEnteringFavoriteIds] = useState(() => new Set());
   const favoritesListRef = useRef(null);
   const favoritePressRef = useRef(null);
   const favoriteTouchPressRef = useRef(null);
@@ -77,9 +78,10 @@ export default function App() {
 
   const transitionSearchPanel = (update) => {
     if (typeof document.startViewTransition === 'function') {
-      document.startViewTransition(() => flushSync(update));
+      return document.startViewTransition(() => flushSync(update));
     } else {
       update();
+      return null;
     }
   };
 
@@ -449,15 +451,23 @@ export default function App() {
     };
 
 
-    setFavorites([newFavorite, ...favorites]);
-
-    transitionSearchPanel(() => {
+    const transition = transitionSearchPanel(() => {
       setSelectedStopName(null);
       setSearchQuery('');
       setStopResults([]);
       setRouteOptions([]);
       setSearchPanelMinHeight(null);
     });
+
+    const addFavorite = () => {
+      setEnteringFavoriteIds(currentIds => new Set(currentIds).add(newFavorite.id));
+      setFavorites(currentFavorites => [newFavorite, ...currentFavorites]);
+    };
+    if (transition) {
+      transition.finished.then(addFavorite, addFavorite);
+    } else {
+      addFavorite();
+    }
   };
 
   const removeFavorite = (id) => {
@@ -467,6 +477,14 @@ export default function App() {
   const finishRemovingFavorite = (id) => {
     setFavorites(currentFavorites => currentFavorites.filter(fav => fav.id !== id));
     setRemovingFavoriteIds(currentIds => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(id);
+      return nextIds;
+    });
+  };
+
+  const finishEnteringFavorite = (id) => {
+    setEnteringFavoriteIds(currentIds => {
       const nextIds = new Set(currentIds);
       nextIds.delete(id);
       return nextIds;
@@ -888,9 +906,14 @@ export default function App() {
                   key={fav.id}
                   data-favorite-slot
                   data-favorite-id={fav.id}
-                  onAnimationEnd={() => finishRemovingFavorite(fav.id)}
+                  onAnimationEnd={(event) => {
+                    if (event.animationName === 'favorite-exit') finishRemovingFavorite(fav.id);
+                    if (event.animationName === 'favorite-enter') finishEnteringFavorite(fav.id);
+                  }}
                   className={`transition-transform duration-200 ease-out ${
-                    removingFavoriteIds.has(fav.id) ? 'favorite-exit' : ''
+                    removingFavoriteIds.has(fav.id)
+                      ? 'favorite-exit'
+                      : enteringFavoriteIds.has(fav.id) ? 'favorite-enter' : ''
                   }`}
                   style={{
                     ...(shift ? { transform: `translateY(${shift}px)` } : {}),
