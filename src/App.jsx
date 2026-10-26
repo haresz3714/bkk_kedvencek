@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { Search, MapPin, Clock, Plus, Trash2, TramFront, Bus, Train, X } from 'lucide-react';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
@@ -64,10 +65,21 @@ export default function App() {
     const saved = localStorage.getItem('bkk_recent_stops');
     return saved ? JSON.parse(saved) : [];
   });
+  const [removingRecentStops, setRemovingRecentStops] = useState(() => new Set());
+  const [removingFavoriteIds, setRemovingFavoriteIds] = useState(() => new Set());
+  const [showRecentStops, setShowRecentStops] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [selectedStopName, setSelectedStopName] = useState(null);
   const [routeOptions, setRouteOptions] = useState([]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
+
+  const transitionSearchPanel = (update) => {
+    if (typeof document.startViewTransition === 'function') {
+      document.startViewTransition(() => flushSync(update));
+    } else {
+      update();
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('bkk_favorites', JSON.stringify(favorites));
@@ -291,6 +303,7 @@ export default function App() {
     setIsLoadingRoutes(true);
     setRouteOptions([]);
     const optionsMap = new Map();
+    let optionsArr = [];
 
     try {
       const fetchPromises = stopIds.map(async (stopId) => {
@@ -370,29 +383,44 @@ export default function App() {
         return 2;
       };
 
-      const optionsArr = filteredOptions.sort((a, b) =>
+      optionsArr = filteredOptions.sort((a, b) =>
         getRoutePriority(a) - getRoutePriority(b) ||
         a.route.localeCompare(b.route, undefined, { numeric: true })
       );
-      setRouteOptions(optionsArr);
     } catch (e) {
       console.error("Általános hiba az útvonalak feldolgozásakor:", e);
     }
 
-    setIsLoadingRoutes(false);
+    transitionSearchPanel(() => {
+      setRouteOptions(optionsArr);
+      setIsLoadingRoutes(false);
+    });
   };
 
   const selectStop = (stop) => {
-    setRecentStops(currentStops => [
-      stop,
-      ...currentStops.filter(recentStop => recentStop.name !== stop.name)
-    ].slice(0, 5));
-    setIsSearchFocused(false);
-    fetchRoutesForStop(stop.name, stop.stopIds);
+    transitionSearchPanel(() => {
+      setShowRecentStops(false);
+      setRecentStops(currentStops => [
+        stop,
+        ...currentStops.filter(recentStop => recentStop.name !== stop.name)
+      ].slice(0, 5));
+      setIsSearchFocused(false);
+      fetchRoutesForStop(stop.name, stop.stopIds);
+    });
   };
 
   const removeRecentStop = (stopName) => {
+    setRemovingRecentStops(currentStops => new Set(currentStops).add(stopName));
+  };
+
+  const finishRemovingRecentStop = (stopName) => {
     setRecentStops(currentStops => currentStops.filter(stop => stop.name !== stopName));
+    if (recentStops.length === 1 && recentStops[0].name === stopName) setShowRecentStops(false);
+    setRemovingRecentStops(currentStops => {
+      const nextStops = new Set(currentStops);
+      nextStops.delete(stopName);
+      return nextStops;
+    });
   };
 
   const handleAddFavorite = (option) => {
@@ -412,14 +440,25 @@ export default function App() {
 
     setFavorites([newFavorite, ...favorites]);
 
-    setSelectedStopName(null);
-    setSearchQuery('');
-    setStopResults([]);
-    setRouteOptions([]);
+    transitionSearchPanel(() => {
+      setSelectedStopName(null);
+      setSearchQuery('');
+      setStopResults([]);
+      setRouteOptions([]);
+    });
   };
 
   const removeFavorite = (id) => {
-    setFavorites(favorites.filter(fav => fav.id !== id));
+    setRemovingFavoriteIds(currentIds => new Set(currentIds).add(id));
+  };
+
+  const finishRemovingFavorite = (id) => {
+    setFavorites(currentFavorites => currentFavorites.filter(fav => fav.id !== id));
+    setRemovingFavoriteIds(currentIds => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(id);
+      return nextIds;
+    });
   };
 
   const cancelFavoritePress = () => {
@@ -674,20 +713,28 @@ export default function App() {
             <Search className="mr-2 w-5 h-5 text-violet-300" /> Új járat hozzáadása
           </h2>
 
+          <div className="search-route-panel">
           {!selectedStopName ? (
             <>
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => setIsSearchFocused(true)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  if (e.target.value) setShowRecentStops(false);
+                  else if (recentStops.length > 0 && isSearchFocused) setShowRecentStops(true);
+                }}
+                onFocus={() => {
+                  setIsSearchFocused(true);
+                  if (searchQuery.length === 0 && recentStops.length > 0) setShowRecentStops(true);
+                }}
                 onBlur={() => setIsSearchFocused(false)}
                 placeholder="Megálló keresése..."
                 className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg mb-2 transition-all placeholder:italic"
               />
 
               {stopResults.length > 0 && (
-                <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2 animate-in fade-in">
+                <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2 search-results-enter">
                   {stopResults.map(stop => (
                     <button
                       key={stop.name}
@@ -701,14 +748,35 @@ export default function App() {
                 </div>
               )}
 
-              {isSearchFocused && searchQuery.length === 0 && recentStops.length > 0 && (
-                <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2 animate-in fade-in">
+              {showRecentStops && recentStops.length > 0 && (
+                <div
+                  onAnimationEnd={(event) => {
+                    if (
+                      event.animationName === 'recent-panel-exit' &&
+                      (!isSearchFocused || searchQuery.length > 0)
+                    ) {
+                      setShowRecentStops(false);
+                    }
+                  }}
+                  className={`bg-zinc-700 rounded-lg overflow-hidden mt-2 ${
+                    isSearchFocused && searchQuery.length === 0
+                      ? 'recent-panel-enter'
+                      : 'recent-panel-exit'
+                  }`}
+                >
                   <h3 className="px-3 pt-3 pb-2 text-sm font-semibold text-zinc-300">Legutóbbi megállók</h3>
                   {recentStops.map(stop => (
-                    <div key={stop.name} className="flex items-center border-t border-zinc-600">
+                    <div
+                      key={stop.name}
+                      onAnimationEnd={() => finishRemovingRecentStop(stop.name)}
+                      className={`flex items-center border-t border-zinc-600 ${
+                        removingRecentStops.has(stop.name) ? 'recent-stop-exit' : ''
+                      }`}
+                    >
                       <button
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => selectStop(stop)}
+                        disabled={removingRecentStops.has(stop.name)}
                         className="flex-1 flex items-center p-3 hover:bg-zinc-600 transition-colors text-left min-w-0"
                       >
                         <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
@@ -717,6 +785,7 @@ export default function App() {
                       <button
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => removeRecentStop(stop.name)}
+                        disabled={removingRecentStops.has(stop.name)}
                         aria-label={`${stop.name} törlése az előzményekből`}
                         className="flex w-12 flex-shrink-0 self-stretch items-center justify-center text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-400"
                       >
@@ -734,7 +803,10 @@ export default function App() {
                   <MapPin className="w-5 h-5 mr-2 flex-shrink-0" /> <span className="truncate">{selectedStopName}</span>
                 </h3>
                 <button
-                  onClick={() => { setSelectedStopName(null); setRouteOptions([]); }}
+                  onClick={() => transitionSearchPanel(() => {
+                    setSelectedStopName(null);
+                    setRouteOptions([]);
+                  })}
                   className="p-1 bg-zinc-700 rounded-full hover:bg-zinc-600 flex-shrink-0 transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -763,8 +835,9 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </div>
+              </div>
           )}
+          </div>
         </div>
 
         <h2 className="text-lg font-semibold mb-3 flex items-center">
@@ -798,7 +871,10 @@ export default function App() {
                   key={fav.id}
                   data-favorite-slot
                   data-favorite-id={fav.id}
-                  className="transition-transform duration-200 ease-out"
+                  onAnimationEnd={() => finishRemovingFavorite(fav.id)}
+                  className={`transition-transform duration-200 ease-out ${
+                    removingFavoriteIds.has(fav.id) ? 'favorite-exit' : ''
+                  }`}
                   style={{
                     ...(shift ? { transform: `translateY(${shift}px)` } : {}),
                     ...(isDragging ? { minHeight: favoriteDrag.height } : {})
@@ -858,7 +934,9 @@ export default function App() {
                       </div>
                       <button
                         onClick={() => removeFavorite(fav.id)}
-                        className="text-red-400 hover:text-red-300 hover:bg-zinc-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center"
+                        disabled={removingFavoriteIds.has(fav.id)}
+                        aria-label={`${fav.stopName} ${fav.route} törlése a kedvencekből`}
+                        className="text-red-400 hover:text-red-300 hover:bg-zinc-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center disabled:pointer-events-none"
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>

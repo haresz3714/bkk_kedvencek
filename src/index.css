@@ -19,8 +19,127 @@ body {
   animation: destination-pan var(--destination-duration) ease-in-out infinite alternate;
 }
 
+.search-route-panel {
+  view-transition-name: search-route-panel;
+}
+
+::view-transition-group(search-route-panel) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+::view-transition-old(search-route-panel),
+::view-transition-new(search-route-panel) {
+  animation-duration: 180ms;
+  animation-timing-function: ease-out;
+}
+
+@keyframes search-results-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.search-results-enter {
+  animation: search-results-enter 180ms ease-out both;
+}
+
+@keyframes recent-panel-enter {
+  from {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    max-height: 420px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.recent-panel-enter {
+  max-height: 420px;
+  animation: recent-panel-enter 220ms ease-out both;
+}
+
+@keyframes recent-panel-exit {
+  from {
+    max-height: 420px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+
+.recent-panel-exit {
+  animation: recent-panel-exit 220ms ease-in both;
+}
+
+@keyframes recent-stop-exit {
+  from {
+    max-height: 80px;
+    opacity: 1;
+  }
+
+  to {
+    max-height: 0;
+    opacity: 0;
+    transform: translateX(8px);
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+.recent-stop-exit {
+  overflow: hidden;
+  animation: recent-stop-exit 180ms ease-in forwards;
+}
+
+@keyframes favorite-exit {
+  from {
+    max-height: 240px;
+    opacity: 1;
+  }
+
+  to {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    transform: scaleY(0.96);
+  }
+}
+
+.favorite-exit {
+  overflow: hidden;
+  transform-origin: top;
+  animation: favorite-exit 220ms ease-in forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .destination-scroll {
     animation: none;
+  }
+
+  .search-results-enter,
+  .recent-panel-enter,
+  .recent-panel-exit,
+  .recent-stop-exit,
+  .favorite-exit,
+  ::view-transition-group(search-route-panel),
+  ::view-transition-old(search-route-panel),
+  ::view-transition-new(search-route-panel) {
+    animation-duration: 1ms !important;
   }
 }
