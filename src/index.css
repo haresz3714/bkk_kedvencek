@@ -5,6 +5,31 @@ body {
   background-color: #18181b;
 }
 
+html {
+  scrollbar-gutter: stable;
+  scrollbar-color: #52525b #18181b;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #18181b;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #52525b;
+  border: 2px solid #18181b;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #71717a;
+}
+
 @keyframes destination-pan {
   0%, 12% {
     transform: translateX(0);
