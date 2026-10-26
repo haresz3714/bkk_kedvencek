@@ -84,6 +84,7 @@ export default function App() {
       const newTimes = {};
       const nowInSeconds = Math.floor(Date.now() / 1000);
       const uniqueStops = [...new Set(favorites.map(f => f.stopId))];
+      const stopDataById = new Map();
 
       for (const stopId of uniqueStops) {
         try {
@@ -92,55 +93,154 @@ export default function App() {
           const result = await response.json();
 
           if (result.code === 200 && result.data) {
-            const stopTimes = result.data.entry.stopTimes || [];
-            const trips = result.data.references.trips || {};
-            const routes = result.data.references.routes || {};
-
-            favorites.filter(f => f.stopId === stopId).forEach(fav => {
-              // Megkeressük az összes járatot, ami megegyezik
-              const matchingRides = stopTimes.filter(item => {
-                const trip = trips[item.tripId] || {};
-                const route = routes[trip.routeId] || {};
-                const lineName = route.shortName || "Ismeretlen";
-
-                if (fav.directionId !== undefined) {
-                  // Biztonsági string konverzió a pontos egyezéshez
-                  return lineName === fav.route && String(trip.directionId) === String(fav.directionId);
-                } else {
-                  const headsign = item.stopHeadsign || "";
-                  return lineName === fav.route && headsign.toLowerCase().includes(fav.headsign.toLowerCase());
-                }
-              });
-
-              if (matchingRides.length > 0) {
-                // Időrendbe állítjuk az indulásokat (bővítve a végállomási indulási időkkel)
-                matchingRides.sort((a, b) => {
-                  const timeA = a.predictedDepartureTime || a.predictedArrivalTime || a.departureTime || a.arrivalTime;
-                  const timeB = b.predictedDepartureTime || b.predictedArrivalTime || b.departureTime || b.arrivalTime;
-                  return timeA - timeB;
-                });
-
-                // Kiszűrjük a már elment járatokat, és percre alakítjuk
-                const validTimes = matchingRides
-                  .map(ride => {
-                    const timeInEpoch = ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
-                    return Math.round((timeInEpoch - nowInSeconds) / 60);
-                  })
-                  .filter(mins => mins > -2); // Ami 1 perce ment el, az még lehet "Most"
-
-                const formattedTimes = validTimes.map(mins => mins <= 0 ? 'Most' : `${mins}'`);
-
-                // Maximum 3 időpontot mentünk el
-                newTimes[fav.id] = formattedTimes.length > 0 ? formattedTimes.slice(0, 3) : ['Nincs adat'];
-              } else {
-                newTimes[fav.id] = ['Nincs adat'];
-              }
-            });
+            stopDataById.set(stopId, result.data);
           }
         } catch (error) {
           console.error("API Hiba élő idők lekérésekor:", error);
         }
       }
+
+      const findMatchingRides = (fav, stopData) => {
+        const stopTimes = stopData?.entry?.stopTimes || [];
+        const trips = stopData?.references?.trips || {};
+        const routes = stopData?.references?.routes || {};
+        let matchingRides = stopTimes.filter(item => {
+          const trip = trips[item.tripId] || {};
+          const route = routes[trip.routeId] || {};
+          return route.shortName === fav.route &&
+            (!fav.routeId || trip.routeId === fav.routeId);
+        });
+
+        if (matchingRides.length === 0) return matchingRides;
+
+        if (!fav.routeId) {
+          const tramRouteIds = new Set(
+            Object.entries(routes)
+              .filter(([, route]) => route.shortName === fav.route && route.type === 'TRAM')
+              .map(([routeId]) => routeId)
+          );
+          if (tramRouteIds.size > 0) {
+            matchingRides = matchingRides.filter(item =>
+              tramRouteIds.has(trips[item.tripId]?.routeId)
+            );
+          }
+        }
+
+        if (fav.headsign) {
+          const headsign = fav.headsign.toLowerCase();
+          const matchingHeadsign = matchingRides.filter(item =>
+            (item.stopHeadsign || '').toLowerCase().includes(headsign)
+          );
+          if (matchingHeadsign.length > 0) return matchingHeadsign;
+        }
+
+        if (fav.directionId !== undefined) {
+          return matchingRides.filter(item =>
+            String(trips[item.tripId]?.directionId) === String(fav.directionId)
+          );
+        }
+
+        return matchingRides;
+      };
+
+      const stopDataByName = new Map();
+      const favoritesToMigrate = new Map();
+
+      for (const fav of favorites) {
+        let stopData = stopDataById.get(fav.stopId);
+        let matchedStopId = fav.stopId;
+        let matchingRides = findMatchingRides(fav, stopData);
+
+        if (matchingRides.length === 0 && fav.stopName) {
+          try {
+            let siblingStopIds = stopDataByName.get(fav.stopName);
+            if (!siblingStopIds) {
+              const response = await fetch(
+                `https://go.bkk.hu/api/query/v1/ws/otp/api/where/search.json?key=${API_KEY}&query=${encodeURIComponent(fav.stopName)}&includeReferences=true`
+              );
+              const result = await response.json();
+              const stops = result.data?.references?.stops || {};
+              siblingStopIds = (result.data?.entry?.stopIds || [])
+                .filter(id => stops[id]?.name === fav.stopName);
+              stopDataByName.set(fav.stopName, siblingStopIds);
+            }
+
+            for (const stopId of siblingStopIds) {
+              if (!stopDataById.has(stopId)) {
+                const response = await fetch(
+                  `https://go.bkk.hu/api/query/v1/ws/otp/api/where/arrivals-and-departures-for-stop.json?key=${API_KEY}&stopId=${stopId}&minutesBefore=0&minutesAfter=60`
+                );
+                const result = await response.json();
+                if (result.code === 200 && result.data) {
+                  stopDataById.set(stopId, result.data);
+                }
+              }
+
+              const candidateStopData = stopDataById.get(stopId);
+              const candidateRides = findMatchingRides(fav, candidateStopData);
+              if (candidateRides.length > 0) {
+                stopData = candidateStopData;
+                matchedStopId = stopId;
+                matchingRides = candidateRides;
+                break;
+              }
+            }
+          } catch (error) {
+            console.error("API Hiba a megálló alternatív indulásainak lekérésekor:", fav.stopName, error);
+          }
+        }
+
+        if (matchingRides.length > 0) {
+          const trips = stopData.references?.trips || {};
+          const routes = stopData.references?.routes || {};
+          const matchedTrip = trips[matchingRides[0].tripId] || {};
+          const matchedRoute = routes[matchedTrip.routeId] || {};
+
+          if (matchedRoute.type && (
+            fav.routeId !== matchedTrip.routeId ||
+            fav.directionId !== matchedTrip.directionId ||
+            fav.stopId !== matchedStopId ||
+            fav.type !== matchedRoute.type ||
+            fav.color !== matchedRoute.color ||
+            fav.textColor !== matchedRoute.textColor
+          )) {
+            favoritesToMigrate.set(fav.id, {
+              routeId: matchedTrip.routeId,
+              directionId: matchedTrip.directionId,
+              stopId: matchedStopId,
+              type: matchedRoute.type,
+              color: matchedRoute.color,
+              textColor: matchedRoute.textColor
+            });
+          }
+
+          matchingRides.sort((a, b) => {
+            const timeA = a.predictedDepartureTime || a.predictedArrivalTime || a.departureTime || a.arrivalTime;
+            const timeB = b.predictedDepartureTime || b.predictedArrivalTime || b.departureTime || b.arrivalTime;
+            return timeA - timeB;
+          });
+
+          const validTimes = matchingRides
+            .map(ride => {
+              const timeInEpoch = ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
+              return Math.round((timeInEpoch - nowInSeconds) / 60);
+            })
+            .filter(mins => mins > -2);
+
+          const formattedTimes = validTimes.map(mins => mins <= 0 ? 'Most' : `${mins}'`);
+          newTimes[fav.id] = formattedTimes.length > 0 ? formattedTimes.slice(0, 3) : ['Nincs adat'];
+        } else {
+          newTimes[fav.id] = ['Nincs adat'];
+        }
+      }
+
+      if (favoritesToMigrate.size > 0) {
+        setFavorites(currentFavorites => currentFavorites.map(fav => {
+          const migration = favoritesToMigrate.get(fav.id);
+          return migration ? { ...fav, ...migration } : fav;
+        }));
+      }
+
       setLiveTimes(newTimes);
     };
 
@@ -228,10 +328,11 @@ export default function App() {
                 }
 
                 // Azonosító: Járatszám + Irány (Nem a szöveg!)
-                const key = `${route.shortName}-${dirId}`;
+                const key = `${route.id}-${dirId}`;
                 if (!optionsMap.has(key)) {
                   optionsMap.set(key, {
                     stopId: stopId,
+                    routeId: route.id,
                     route: route.shortName,
                     directionId: dirId,
                     headsign: displayHeadsign,
@@ -250,6 +351,14 @@ export default function App() {
 
       await Promise.all(fetchPromises);
 
+      const options = Array.from(optionsMap.values());
+      const tramRouteNames = new Set(
+        options.filter(option => option.type === 'TRAM').map(option => option.route)
+      );
+      const filteredOptions = options.filter(option =>
+        option.type !== 'BUS' || !tramRouteNames.has(option.route)
+      );
+
       const getRoutePriority = (option) => {
         if (
           ['SUBWAY', 'SUBURBAN_RAILWAY', 'RAIL'].includes(option.type) ||
@@ -261,7 +370,7 @@ export default function App() {
         return 2;
       };
 
-      const optionsArr = Array.from(optionsMap.values()).sort((a, b) =>
+      const optionsArr = filteredOptions.sort((a, b) =>
         getRoutePriority(a) - getRoutePriority(b) ||
         a.route.localeCompare(b.route, undefined, { numeric: true })
       );
@@ -291,6 +400,7 @@ export default function App() {
       id: Date.now(),
       stopName: selectedStopName,
       stopId: option.stopId,
+      routeId: option.routeId,
       route: option.route,
       directionId: option.directionId,
       headsign: option.headsign,
