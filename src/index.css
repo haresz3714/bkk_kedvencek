@@ -1,13 +1,29 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+  --page-background: #18181b;
+  --scrollbar-track: #18181b;
+  --scrollbar-thumb: #52525b;
+  --scrollbar-thumb-hover: #71717a;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page-background: #f3f6f8;
+  --scrollbar-track: #e6edf2;
+  --scrollbar-thumb: #a8bac7;
+  --scrollbar-thumb-hover: #8299a9;
+}
+
 html,
 body {
-  background-color: #18181b;
+  background-color: var(--page-background);
 }
 
 html {
   scrollbar-gutter: stable;
-  scrollbar-color: #52525b #18181b;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
 }
 
@@ -17,17 +33,124 @@ html {
 }
 
 ::-webkit-scrollbar-track {
-  background: #18181b;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #52525b;
-  border: 2px solid #18181b;
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid var(--scrollbar-track);
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #71717a;
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+.app-shell {
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.app-shell[data-theme="light"] {
+  background-color: #f3f6f8;
+  color: #1f2933;
+}
+
+.app-shell[data-theme="light"] .bg-zinc-900 {
+  background-color: #f3f6f8;
+}
+
+.app-shell[data-theme="light"] .bg-zinc-800 {
+  background-color: #ffffff;
+}
+
+.app-shell[data-theme="light"] .bg-zinc-700 {
+  background-color: #edf3f7;
+}
+
+.app-shell[data-theme="light"] .bg-zinc-600 {
+  background-color: #dceaf2;
+}
+
+.app-shell[data-theme="light"] .text-white {
+  color: #1f2933;
+}
+
+.app-shell[data-theme="light"] .text-violet-300 {
+  color: #0067a8;
+}
+
+.app-shell[data-theme="light"] .text-zinc-300 {
+  color: #455a69;
+}
+
+.app-shell[data-theme="light"] .text-zinc-400 {
+  color: #607887;
+}
+
+.app-shell[data-theme="light"] .text-zinc-500 {
+  color: #718693;
+}
+
+.app-shell[data-theme="light"] .text-red-400 {
+  color: #c73737;
+}
+
+.app-shell[data-theme="light"] .text-red-300 {
+  color: #b42318;
+}
+
+.app-shell[data-theme="light"] .text-green-400 {
+  color: #16804a;
+}
+
+.app-shell[data-theme="light"] .border-zinc-700 {
+  border-color: #d5e0e7;
+}
+
+.app-shell[data-theme="light"] .border-zinc-600 {
+  border-color: #d5e0e7;
+}
+
+.app-shell[data-theme="light"] .border-violet-400 {
+  border-color: #0072bc;
+}
+
+.app-shell[data-theme="light"] .ring-violet-300 {
+  --tw-ring-color: #73b9e2;
+}
+
+.app-shell[data-theme="light"] .focus\:ring-violet-400:focus {
+  --tw-ring-color: #168ac5;
+}
+
+.app-shell[data-theme="light"] .hover\:bg-zinc-700:hover {
+  background-color: #e2edf3;
+}
+
+.app-shell[data-theme="light"] .hover\:bg-zinc-600:hover {
+  background-color: #dceaf2;
+}
+
+.app-shell[data-theme="light"] .hover\:bg-violet-700:hover {
+  background-color: #0067a8;
+}
+
+.app-shell[data-theme="light"] .hover\:text-white:hover {
+  color: #ffffff;
+}
+
+.app-shell[data-theme="light"] footer .hover\:text-white:hover {
+  color: #00558a;
+}
+
+.app-shell[data-theme="light"] .hover\:text-red-300:hover {
+  color: #b42318;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell {
+    transition: none;
+  }
 }
 
 @keyframes destination-pan {

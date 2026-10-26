@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, MapPin, Clock, Plus, Trash2, TramFront, Bus, Train, X } from 'lucide-react';
+import { Search, MapPin, Clock, Plus, Trash2, TramFront, Bus, Train, X, Sun, Moon } from 'lucide-react';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 
@@ -46,6 +46,9 @@ function DestinationText({ children, className = '' }) {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState(() =>
+    document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+  );
   const [favorites, setFavorites] = useState(() => {
     const saved = localStorage.getItem('bkk_favorites');
     return saved ? JSON.parse(saved) : [];
@@ -88,6 +91,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('bkk_favorites', JSON.stringify(favorites));
   }, [favorites]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('bkk_theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     localStorage.setItem('bkk_recent_stops', JSON.stringify(recentStops));
@@ -734,9 +742,20 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-900 text-white p-4 font-sans pb-20 flex flex-col">
+    <div data-theme={theme} className="app-shell min-h-screen bg-zinc-900 text-white p-4 font-sans pb-20 flex flex-col">
       <div className="max-w-md mx-auto w-full flex-1">
-        <h1 className="text-2xl font-bold mb-6 text-center text-violet-300">BudapestGO <i>Rapid</i></h1>
+        <div className="relative mb-6 flex items-center justify-center">
+          <h1 className="text-2xl font-bold text-center text-violet-300">BudapestGO <i>Rapid</i></h1>
+          <button
+            type="button"
+            onClick={() => setTheme(currentTheme => currentTheme === 'dark' ? 'light' : 'dark')}
+            aria-label={theme === 'dark' ? 'Világos mód bekapcsolása' : 'Sötét mód bekapcsolása'}
+            title={theme === 'dark' ? 'Világos mód' : 'Sötét mód'}
+            className="absolute right-0 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-violet-300 transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+          >
+            {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </button>
+        </div>
 
         <div className="bg-zinc-800 p-4 rounded-xl mb-6 shadow-lg border border-zinc-700">
           <h2 className="text-lg font-semibold mb-3 flex items-center">
