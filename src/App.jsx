@@ -378,170 +378,230 @@ export default function App() {
   }, [showTrafficChanges, trafficAlertsRefreshKey]);
 
   useEffect(() => {
+    if (favorites.length === 0 || !API_KEY || API_KEY === 'A_TE_API_KULCSOD') return;
+
+    const controller = new AbortController();
+    let active = true;
+    let isFetching = false;
+
     const fetchTimes = async () => {
-      if (favorites.length === 0 || !API_KEY || API_KEY === "A_TE_API_KULCSOD") return;
+      if (isFetching || controller.signal.aborted) return;
+      isFetching = true;
 
-      const newTimes = {};
-      const nowInSeconds = Math.floor(Date.now() / 1000);
-      const uniqueStops = [...new Set(favorites.map(f => f.stopId))];
-      const stopDataById = new Map();
-
-      for (const stopId of uniqueStops) {
-        try {
+      try {
+        const newTimes = {};
+        const nowInSeconds = Math.floor(Date.now() / 1000);
+        const uniqueStops = [...new Set(favorites.map(f => f.stopId))];
+        const pendingStops = [...uniqueStops];
+        const attemptedStopIds = new Set(uniqueStops);
+        const stopDataById = new Map();
+        const fetchStopData = async (stopId) => {
           const url = `https://go.bkk.hu/api/query/v1/ws/otp/api/where/arrivals-and-departures-for-stop.json?key=${API_KEY}&stopId=${stopId}&minutesBefore=0&minutesAfter=60`;
-          const response = await fetch(url);
+          const response = await fetch(url, { signal: controller.signal });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const result = await response.json();
-
-          if (result.code === 200 && result.data) {
-            stopDataById.set(stopId, result.data);
+          if (result.code !== 200 || !result.data) {
+            throw new Error(result.text || 'Érvénytelen API-válasz');
           }
-        } catch (error) {
-          console.error("API Hiba élő idők lekérésekor:", error);
-        }
-      }
+          return result.data;
+        };
 
-      const findMatchingRides = (fav, stopData) => {
-        const stopTimes = stopData?.entry?.stopTimes || [];
-        const trips = stopData?.references?.trips || {};
-        const routes = stopData?.references?.routes || {};
-        let matchingRides = stopTimes.filter(item => {
-          const trip = trips[item.tripId] || {};
-          const route = routes[trip.routeId] || {};
-          return route.shortName === fav.route &&
-            (!fav.routeId || trip.routeId === fav.routeId);
-        });
-
-        if (matchingRides.length === 0) return matchingRides;
-
-        if (!fav.routeId) {
-          const tramRouteIds = new Set(
-            Object.entries(routes)
-              .filter(([, route]) => route.shortName === fav.route && route.type === 'TRAM')
-              .map(([routeId]) => routeId)
-          );
-          if (tramRouteIds.size > 0) {
-            matchingRides = matchingRides.filter(item =>
-              tramRouteIds.has(trips[item.tripId]?.routeId)
-            );
-          }
-        }
-
-        if (fav.headsign) {
-          const headsign = fav.headsign.toLowerCase();
-          const matchingHeadsign = matchingRides.filter(item =>
-            (item.stopHeadsign || '').toLowerCase().includes(headsign)
-          );
-          if (matchingHeadsign.length > 0) return matchingHeadsign;
-        }
-
-        if (fav.directionId !== undefined) {
-          return matchingRides.filter(item =>
-            String(trips[item.tripId]?.directionId) === String(fav.directionId)
-          );
-        }
-
-        return matchingRides;
-      };
-      const getRideTime = ride =>
-        ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
-
-      const stopDataByName = new Map();
-      const favoritesToMigrate = new Map();
-
-      for (const fav of favorites) {
-        let stopData = stopDataById.get(fav.stopId);
-        let matchedStopId = fav.stopId;
-        let matchingRides = findMatchingRides(fav, stopData);
-
-        if (matchingRides.length === 0 && fav.stopName) {
-          try {
-            let siblingStopIds = stopDataByName.get(fav.stopName);
-            if (!siblingStopIds) {
-              const response = await fetch(
-                `https://go.bkk.hu/api/query/v1/ws/otp/api/where/search.json?key=${API_KEY}&query=${encodeURIComponent(fav.stopName)}&includeReferences=true`
-              );
-              const result = await response.json();
-              const stops = result.data?.references?.stops || {};
-              siblingStopIds = (result.data?.entry?.stopIds || [])
-                .filter(id => stops[id]?.name === fav.stopName);
-              stopDataByName.set(fav.stopName, siblingStopIds);
-            }
-
-            for (const stopId of siblingStopIds) {
-              if (!stopDataById.has(stopId)) {
-                const response = await fetch(
-                  `https://go.bkk.hu/api/query/v1/ws/otp/api/where/arrivals-and-departures-for-stop.json?key=${API_KEY}&stopId=${stopId}&minutesBefore=0&minutesAfter=60`
-                );
-                const result = await response.json();
-                if (result.code === 200 && result.data) {
-                  stopDataById.set(stopId, result.data);
+        const workers = Array.from(
+          { length: Math.min(4, pendingStops.length) },
+          async () => {
+            while (pendingStops.length > 0 && !controller.signal.aborted) {
+              const stopId = pendingStops.shift();
+              try {
+                stopDataById.set(stopId, await fetchStopData(stopId));
+              } catch (error) {
+                if (error.name !== 'AbortError') {
+                  console.error("API Hiba élő idők lekérésekor:", error);
                 }
               }
+            }
+          }
+        );
+        await Promise.all(workers);
+        if (!active || controller.signal.aborted) return;
 
-              const candidateStopData = stopDataById.get(stopId);
-              const candidateRides = findMatchingRides(fav, candidateStopData);
-              if (candidateRides.length > 0) {
-                stopData = candidateStopData;
-                matchedStopId = stopId;
-                matchingRides = candidateRides;
-                break;
+        const findMatchingRides = (fav, stopData) => {
+          const stopTimes = stopData?.entry?.stopTimes || [];
+          const trips = stopData?.references?.trips || {};
+          const routes = stopData?.references?.routes || {};
+          let matchingRides = stopTimes.filter(item => {
+            const trip = trips[item.tripId] || {};
+            const route = routes[trip.routeId] || {};
+            return route.shortName === fav.route &&
+              (!fav.routeId || trip.routeId === fav.routeId);
+          });
+
+          if (matchingRides.length === 0) return matchingRides;
+
+          if (!fav.routeId) {
+            const tramRouteIds = new Set(
+              Object.entries(routes)
+                .filter(([, route]) => route.shortName === fav.route && route.type === 'TRAM')
+                .map(([routeId]) => routeId)
+            );
+            if (tramRouteIds.size > 0) {
+              matchingRides = matchingRides.filter(item =>
+                tramRouteIds.has(trips[item.tripId]?.routeId)
+              );
+            }
+          }
+
+          if (fav.headsign) {
+            const headsign = fav.headsign.toLowerCase();
+            const matchingHeadsign = matchingRides.filter(item =>
+              (item.stopHeadsign || '').toLowerCase().includes(headsign)
+            );
+            if (matchingHeadsign.length > 0) return matchingHeadsign;
+          }
+
+          if (fav.directionId !== undefined) {
+            return matchingRides.filter(item =>
+              String(trips[item.tripId]?.directionId) === String(fav.directionId)
+            );
+          }
+
+          return matchingRides;
+        };
+        const getRideTime = ride =>
+          ride.predictedDepartureTime || ride.predictedArrivalTime || ride.departureTime || ride.arrivalTime;
+
+        const stopDataByName = new Map();
+        const favoritesToMigrate = new Map();
+
+        for (const fav of favorites) {
+          let stopData = stopDataById.get(fav.stopId);
+          let matchedStopId = fav.stopId;
+          let lookupFailed = !stopData;
+          let matchingRides = findMatchingRides(fav, stopData);
+
+          if (matchingRides.length === 0 && fav.stopName) {
+            try {
+              let siblingStopIds = stopDataByName.get(fav.stopName);
+              if (!siblingStopIds) {
+                const response = await fetch(
+                  `https://go.bkk.hu/api/query/v1/ws/otp/api/where/search.json?key=${API_KEY}&query=${encodeURIComponent(fav.stopName)}&includeReferences=true`,
+                  { signal: controller.signal }
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                if (result.code !== 200 || !result.data) {
+                  throw new Error(result.text || 'Érvénytelen API-válasz');
+                }
+                const stops = result.data.references?.stops || {};
+                siblingStopIds = (result.data.entry?.stopIds || [])
+                  .filter(id => stops[id]?.name === fav.stopName);
+                stopDataByName.set(fav.stopName, siblingStopIds);
+              }
+
+              for (const stopId of siblingStopIds) {
+                if (!stopDataById.has(stopId)) {
+                  if (attemptedStopIds.has(stopId)) {
+                    lookupFailed = true;
+                    continue;
+                  }
+                  attemptedStopIds.add(stopId);
+                  try {
+                    stopDataById.set(stopId, await fetchStopData(stopId));
+                  } catch (error) {
+                    lookupFailed = true;
+                    if (error.name === 'AbortError') break;
+                    console.error("API Hiba alternatív megálló élő idejének lekérésekor:", error);
+                    continue;
+                  }
+                }
+
+                const candidateStopData = stopDataById.get(stopId);
+                const candidateRides = findMatchingRides(fav, candidateStopData);
+                if (candidateRides.length > 0) {
+                  stopData = candidateStopData;
+                  matchedStopId = stopId;
+                  matchingRides = candidateRides;
+                  break;
+                }
+              }
+            } catch (error) {
+              lookupFailed = true;
+              if (error.name !== 'AbortError') {
+                console.error("API Hiba a megálló alternatív indulásainak lekérésekor:", fav.stopName, error);
               }
             }
-          } catch (error) {
-            console.error("API Hiba a megálló alternatív indulásainak lekérésekor:", fav.stopName, error);
+          }
+
+          if (controller.signal.aborted) return;
+
+          if (matchingRides.length > 0) {
+            const trips = stopData.references?.trips || {};
+            const routes = stopData.references?.routes || {};
+            const matchedTrip = trips[matchingRides[0].tripId] || {};
+            const matchedRoute = routes[matchedTrip.routeId] || {};
+
+            if (matchedRoute.type && (
+              fav.routeId !== matchedTrip.routeId ||
+              fav.directionId !== matchedTrip.directionId ||
+              fav.stopId !== matchedStopId ||
+              fav.type !== matchedRoute.type ||
+              fav.color !== matchedRoute.color ||
+              fav.textColor !== matchedRoute.textColor
+            )) {
+              favoritesToMigrate.set(fav.id, {
+                routeId: matchedTrip.routeId,
+                directionId: matchedTrip.directionId,
+                stopId: matchedStopId,
+                type: matchedRoute.type,
+                color: matchedRoute.color,
+                textColor: matchedRoute.textColor
+              });
+            }
+
+            matchingRides.sort((a, b) => getRideTime(a) - getRideTime(b));
+
+            const validTimes = matchingRides
+              .map(ride => Math.round((getRideTime(ride) - nowInSeconds) / 60))
+              .filter(mins => mins > -2);
+
+            const formattedTimes = validTimes.map(mins => mins <= 0 ? 'Most' : `${mins}'`);
+            newTimes[fav.id] = formattedTimes.length > 0 ? formattedTimes.slice(0, 3) : ['Nincs adat'];
+          } else if (!lookupFailed) {
+            newTimes[fav.id] = ['Nincs adat'];
           }
         }
 
-        if (matchingRides.length > 0) {
-          const trips = stopData.references?.trips || {};
-          const routes = stopData.references?.routes || {};
-          const matchedTrip = trips[matchingRides[0].tripId] || {};
-          const matchedRoute = routes[matchedTrip.routeId] || {};
+        if (!active || controller.signal.aborted) return;
 
-          if (matchedRoute.type && (
-            fav.routeId !== matchedTrip.routeId ||
-            fav.directionId !== matchedTrip.directionId ||
-            fav.stopId !== matchedStopId ||
-            fav.type !== matchedRoute.type ||
-            fav.color !== matchedRoute.color ||
-            fav.textColor !== matchedRoute.textColor
-          )) {
-            favoritesToMigrate.set(fav.id, {
-              routeId: matchedTrip.routeId,
-              directionId: matchedTrip.directionId,
-              stopId: matchedStopId,
-              type: matchedRoute.type,
-              color: matchedRoute.color,
-              textColor: matchedRoute.textColor
-            });
-          }
-
-          matchingRides.sort((a, b) => getRideTime(a) - getRideTime(b));
-
-          const validTimes = matchingRides
-            .map(ride => Math.round((getRideTime(ride) - nowInSeconds) / 60))
-            .filter(mins => mins > -2);
-
-          const formattedTimes = validTimes.map(mins => mins <= 0 ? 'Most' : `${mins}'`);
-          newTimes[fav.id] = formattedTimes.length > 0 ? formattedTimes.slice(0, 3) : ['Nincs adat'];
-        } else {
-          newTimes[fav.id] = ['Nincs adat'];
+        if (favoritesToMigrate.size > 0) {
+          setFavorites(currentFavorites => currentFavorites.map(fav => {
+            const migration = favoritesToMigrate.get(fav.id);
+            return migration ? { ...fav, ...migration } : fav;
+          }));
         }
-      }
 
-      if (favoritesToMigrate.size > 0) {
-        setFavorites(currentFavorites => currentFavorites.map(fav => {
-          const migration = favoritesToMigrate.get(fav.id);
-          return migration ? { ...fav, ...migration } : fav;
-        }));
+        setLiveTimes(currentTimes => {
+          const updatedTimes = {};
+          for (const fav of favorites) {
+            if (Object.hasOwn(newTimes, fav.id)) {
+              updatedTimes[fav.id] = newTimes[fav.id];
+            } else if (currentTimes[fav.id]) {
+              updatedTimes[fav.id] = currentTimes[fav.id];
+            }
+          }
+          return updatedTimes;
+        });
+      } finally {
+        isFetching = false;
       }
-
-      setLiveTimes(newTimes);
     };
 
-    fetchTimes();
-    const interval = setInterval(fetchTimes, 30000);
-    return () => clearInterval(interval);
+    void fetchTimes();
+    const interval = setInterval(() => void fetchTimes(), 30000);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [favorites]);
 
   useEffect(() => {
@@ -1250,7 +1310,7 @@ export default function App() {
           <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
         </h2>
         <p className="-mt-2 mb-3 text-xs text-zinc-500">
-          Sorrend átrendezése: Számítógépen fogd meg húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
+          Sorrend átrendezése: Számítógépen fogd meg, majd húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
         </p>
 
         {favorites.length === 0 ? (
