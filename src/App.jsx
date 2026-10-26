@@ -56,7 +56,6 @@ export default function App() {
   const [favoriteDrag, setFavoriteDrag] = useState(null);
   const [enteringFavoriteIds, setEnteringFavoriteIds] = useState(() => new Set());
   const favoritesListRef = useRef(null);
-  const favoritePressRef = useRef(null);
   const favoriteTouchPressRef = useRef(null);
   const favoriteTouchDragRef = useRef(null);
 
@@ -499,13 +498,6 @@ export default function App() {
     });
   };
 
-  const cancelFavoritePress = () => {
-    if (favoritePressRef.current) {
-      clearTimeout(favoritePressRef.current.timeoutId);
-      favoritePressRef.current = null;
-    }
-  };
-
   const createFavoriteDrag = (favorite, index, currentTarget, x, y) => {
     const card = currentTarget.getBoundingClientRect();
     const list = favoritesListRef.current;
@@ -533,27 +525,28 @@ export default function App() {
     };
   };
 
+  const reorderFavorite = (drag) => {
+    const fromIndex = favorites.findIndex(favorite => favorite.id === drag.id);
+    if (fromIndex < 0 || fromIndex === drag.targetIndex) return;
+
+    const reordered = [...favorites];
+    const [movingFavorite] = reordered.splice(fromIndex, 1);
+    reordered.splice(drag.targetIndex, 0, movingFavorite);
+    setFavorites(reordered);
+  };
+
   const handleFavoritePointerDown = (event, favorite, index) => {
     if (event.pointerType === 'touch' || event.button !== 0 || event.target.closest('button')) return;
 
-    cancelFavoritePress();
     const { clientX, clientY, currentTarget, pointerId } = event;
-    const timeoutId = setTimeout(() => {
-      const drag = createFavoriteDrag(favorite, index, currentTarget, clientX, clientY);
-      if (!drag) return;
-      setFavoriteDrag({
-        ...drag,
-        pointerId,
-      });
-      currentTarget.setPointerCapture(pointerId);
-    }, 1000);
+    const drag = createFavoriteDrag(favorite, index, currentTarget, clientX, clientY);
+    if (!drag) return;
 
-    favoritePressRef.current = {
+    setFavoriteDrag({
+      ...drag,
       pointerId,
-      x: clientX,
-      y: clientY,
-      timeoutId
-    };
+    });
+    currentTarget.setPointerCapture(pointerId);
   };
 
   const cancelFavoriteTouchPress = () => {
@@ -641,29 +634,11 @@ export default function App() {
 
     const drag = favoriteTouchDragRef.current;
     cancelFavoriteTouchPress();
-    if (shouldReorder && drag) {
-      setFavorites(current => {
-        const fromIndex = current.findIndex(favorite => favorite.id === drag.id);
-        if (fromIndex < 0) return current;
-
-        const reordered = [...current];
-        const [movingFavorite] = reordered.splice(fromIndex, 1);
-        reordered.splice(drag.targetIndex, 0, movingFavorite);
-        return reordered;
-      });
-    }
+    if (shouldReorder && drag) reorderFavorite(drag);
     setFavoriteDrag(null);
   };
 
   const handleFavoritePointerMove = (event) => {
-    const press = favoritePressRef.current;
-    if (press && press.pointerId === event.pointerId && !favoriteDrag) {
-      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) {
-        cancelFavoritePress();
-      }
-      return;
-    }
-
     if (!favoriteDrag || favoriteDrag.pointerId !== event.pointerId) return;
 
     event.preventDefault();
@@ -677,20 +652,9 @@ export default function App() {
   };
 
   const finishFavoriteDrag = (event, shouldReorder) => {
-    cancelFavoritePress();
     if (!favoriteDrag || favoriteDrag.pointerId !== event.pointerId) return;
 
-    if (shouldReorder) {
-      setFavorites(current => {
-        const fromIndex = current.findIndex(favorite => favorite.id === favoriteDrag.id);
-        if (fromIndex < 0) return current;
-
-        const reordered = [...current];
-        const [movingFavorite] = reordered.splice(fromIndex, 1);
-        reordered.splice(favoriteDrag.targetIndex, 0, movingFavorite);
-        return reordered;
-      });
-    }
+    if (shouldReorder) reorderFavorite(favoriteDrag);
     setFavoriteDrag(null);
   };
 
@@ -898,7 +862,7 @@ export default function App() {
           <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
         </h2>
         <p className="-mt-2 mb-3 text-xs text-zinc-500">
-          Átrendezéshez tartsd lenyomva a kártyát 1 másodpercig, majd húzd a helyére.
+          Számítógépen húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
         </p>
 
         {favorites.length === 0 ? (
@@ -929,7 +893,7 @@ export default function App() {
                     if (event.animationName === 'favorite-exit') finishRemovingFavorite(fav.id);
                     if (event.animationName === 'favorite-enter') finishEnteringFavorite(fav.id);
                   }}
-                  className={`transition-transform duration-200 ease-out ${
+                  className={`${favoriteDrag ? 'transition-transform duration-200 ease-out' : 'transition-none'} ${
                     removingFavoriteIds.has(fav.id)
                       ? 'favorite-exit'
                       : enteringFavoriteIds.has(fav.id) ? 'favorite-enter' : ''
