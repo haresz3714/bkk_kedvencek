@@ -167,12 +167,6 @@ html {
   color: #b42318;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .app-shell {
-    transition: none;
-  }
-}
-
 @keyframes destination-pan {
   0%, 12% {
     transform: translateX(0);
@@ -414,53 +408,43 @@ html {
   animation: recent-stop-exit 180ms ease-in forwards;
 }
 
-@keyframes favorite-exit {
-  from {
-    max-height: 240px;
-    opacity: 1;
-  }
-
-  to {
-    max-height: 0;
-    opacity: 0;
-    margin-top: 0;
-    transform: scaleY(0.96);
-  }
-}
-
-.favorite-exit {
-  overflow: hidden;
-  transform-origin: top;
-  animation: favorite-exit 220ms ease-in forwards;
-}
-
 @keyframes favorite-enter {
   from {
-    max-height: 0;
+    grid-template-rows: 0fr;
     opacity: 0;
-    transform: translateY(-4px);
   }
 
   to {
-    max-height: 160px;
+    grid-template-rows: 1fr;
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
 .favorite-enter {
+  display: grid;
   overflow: hidden;
-  transform-origin: top;
-  animation: favorite-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: favorite-enter 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.favorite-animation-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.favorite-list > [data-favorite-slot] + [data-favorite-slot] {
+  margin-block-start: 0.75rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-shell {
+    transition: none;
+  }
+
   .destination-scroll {
     animation: none;
   }
 
   .recent-stop-exit,
-  .favorite-exit,
   .favorite-enter,
   ::view-transition-group(search-route-panel),
   ::view-transition-old(search-route-panel),

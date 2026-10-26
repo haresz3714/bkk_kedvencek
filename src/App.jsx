@@ -12,6 +12,17 @@ const ALERT_FILTERS = [
   { id: 'night', label: 'Éjszakai' },
   { id: 'other', label: 'Egyéb' }
 ];
+const OFFICIAL_ROUTE_COLORS = {
+  M1: { background: '#FFD800', text: '#000000' },
+  M2: { background: '#FF1C24', text: '#FFFFFF' },
+  M3: { background: '#005CA5', text: '#FFFFFF' },
+  M4: { background: '#19A74E', text: '#FFFFFF' },
+  H5: { background: '#821066', text: '#FFFFFF' },
+  H6: { background: '#884200', text: '#FFFFFF' },
+  H7: { background: '#EE7203', text: '#FFFFFF' },
+  H8: { background: '#E56EA6', text: '#FFFFFF' },
+  H9: { background: '#E56EA6', text: '#FFFFFF' }
+};
 
 const getTranslatedAlertText = (value) =>
   value?.translations?.hu || value?.translations?.en || value?.someTranslation || '';
@@ -760,6 +771,67 @@ export default function App() {
 
   const removeFavorite = (id) => {
     setRemovingFavoriteIds(currentIds => new Set(currentIds).add(id));
+    const slot = Array.from(
+      favoritesListRef.current?.querySelectorAll('[data-favorite-slot]') ?? []
+    ).find(favoriteSlot => favoriteSlot.dataset.favoriteId === String(id));
+
+    if (!slot || typeof slot.animate !== 'function') {
+      finishRemovingFavorite(id);
+      return;
+    }
+
+    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 320;
+    const styles = window.getComputedStyle(slot);
+    const nextSlot = slot.nextElementSibling;
+    let gapAnimation;
+    const animations = [slot.animate(
+      [
+        {
+          height: `${slot.getBoundingClientRect().height}px`,
+          marginBlockStart: styles.marginBlockStart,
+          opacity: styles.opacity
+        },
+        { height: '0px', marginBlockStart: '0px', opacity: 0 }
+      ],
+      {
+        duration,
+        easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+        fill: 'forwards'
+      }
+    )];
+
+    slot.style.overflow = 'hidden';
+    slot.style.minHeight = '0';
+    slot.style.flex = '0 0 auto';
+
+    if (!slot.previousElementSibling && nextSlot instanceof HTMLElement) {
+      const nextStyles = window.getComputedStyle(nextSlot);
+      gapAnimation = nextSlot.animate(
+        [
+          { marginBlockStart: nextStyles.marginBlockStart },
+          { marginBlockStart: '0px' }
+        ],
+        {
+          duration,
+          easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+          fill: 'forwards'
+        }
+      );
+      animations.push(gapAnimation);
+    }
+
+    let remainingAnimations = animations.length;
+    const finishAfterAnimations = () => {
+      remainingAnimations -= 1;
+      if (remainingAnimations === 0) {
+        finishRemovingFavorite(id);
+        if (gapAnimation) requestAnimationFrame(() => gapAnimation.cancel());
+      }
+    };
+    animations.forEach(animation => {
+      animation.onfinish = finishAfterAnimations;
+      animation.oncancel = finishAfterAnimations;
+    });
   };
 
   const finishRemovingFavorite = (id) => {
@@ -940,29 +1012,14 @@ export default function App() {
   };
 
   const renderVehicleBadge = (route, type, color, textColor) => {
-    let bgColor = color ? `#${color}` : '#009FE3';
-    let txtColor = textColor ? `#${textColor}` : '#FFFFFF';
+    const officialColors = Object.hasOwn(OFFICIAL_ROUTE_COLORS, route)
+      ? OFFICIAL_ROUTE_COLORS[route]
+      : undefined;
+    const bgColor = officialColors?.background || (color ? `#${color}` : '#009FE3');
+    const txtColor = officialColors?.text || (textColor ? `#${textColor}` : '#FFFFFF');
+    const isBadgeOnly = Boolean(officialColors) ||
+      type === 'SUBWAY' || type === 'SUBURBAN_RAILWAY' || type === 'RAIL';
 
-    // Alapértelmezetten a SUBWAY és a SUBURBAN_RAILWAY kap ikontalan jelvényt, de kibővítjük a RAIL-el is
-    let isBadgeOnly = type === 'SUBWAY' || type === 'SUBURBAN_RAILWAY' || type === 'RAIL';
-
-    // 1. HIVATALOS BKK SZÍNEK KIKÉNYSZERÍTÉSE (Metrók és HÉV-ek)
-    if (['M1', 'M2', 'M3', 'M4'].includes(route)) {
-      isBadgeOnly = true;
-      if (route === 'M1') { bgColor = '#FFD800'; txtColor = '#000000'; }
-      if (route === 'M2') { bgColor = '#FF1C24'; txtColor = '#FFFFFF'; }
-      if (route === 'M3') { bgColor = '#005CA5'; txtColor = '#FFFFFF'; }
-      if (route === 'M4') { bgColor = '#19A74E'; txtColor = '#FFFFFF'; }
-    }
-    else if (['H5', 'H6', 'H7', 'H8', 'H9'].includes(route)) {
-      isBadgeOnly = true;
-      if (route === 'H5') { bgColor = '#821066'; txtColor = '#FFFFFF'; } // Lila
-      if (route === 'H6') { bgColor = '#884200'; txtColor = '#FFFFFF'; } // Barna
-      if (route === 'H7') { bgColor = '#EE7203'; txtColor = '#FFFFFF'; } // Narancs
-      if (route === 'H8' || route === 'H9') { bgColor = '#E56EA6'; txtColor = '#FFFFFF'; } // Rózsaszín
-    }
-
-    // 2. Metrók és HÉV-ek (Ikon nélkül, csak szöveg)
     if (isBadgeOnly) {
       return (
         <span
@@ -974,7 +1031,6 @@ export default function App() {
       );
     }
 
-    // 3. Felszíni járatok (Busz, Troli, Villamos + Ikon)
     return (
       <span
         className="px-2 py-0.5 rounded text-sm font-bold mr-2 flex items-center flex-shrink-0"
@@ -1207,7 +1263,7 @@ export default function App() {
             Keresd meg a megállódat, és adj hozzá járatokat!
           </div>
         ) : (
-          <div ref={favoritesListRef} className="space-y-3">
+          <div ref={favoritesListRef} className="favorite-list flex flex-col">
             {favorites.map((fav, index) => {
               const isDragging = favoriteDrag?.id === fav.id;
               const movesDown = favoriteDrag &&
@@ -1229,13 +1285,10 @@ export default function App() {
                   data-favorite-slot
                   data-favorite-id={fav.id}
                   onAnimationEnd={(event) => {
-                    if (event.animationName === 'favorite-exit') finishRemovingFavorite(fav.id);
                     if (event.animationName === 'favorite-enter') finishEnteringFavorite(fav.id);
                   }}
                   className={`${favoriteDrag ? 'transition-transform duration-200 ease-out' : 'transition-none'} ${
-                    removingFavoriteIds.has(fav.id)
-                      ? 'favorite-exit'
-                      : enteringFavoriteIds.has(fav.id) ? 'favorite-enter' : ''
+                    enteringFavoriteIds.has(fav.id) ? 'favorite-enter' : ''
                   }`}
                   style={{
                     ...(shift ? { transform: `translateY(${shift}px)` } : {}),
@@ -1248,7 +1301,7 @@ export default function App() {
                     onPointerUp={(event) => finishFavoriteDrag(event, true)}
                     onPointerCancel={(event) => finishFavoriteDrag(event, false)}
                     onTouchStart={(event) => handleFavoriteTouchStart(event, fav, index)}
-                    className={`bg-zinc-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-violet-400 select-none ${
+                    className={`favorite-animation-content bg-zinc-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-violet-400 select-none ${
                       isDragging
                         ? 'fixed z-50 cursor-grabbing scale-[1.02] shadow-2xl ring-2 ring-violet-300'
                         : 'cursor-grab'
