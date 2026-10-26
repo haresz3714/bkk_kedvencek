@@ -72,6 +72,8 @@ export default function App() {
   const [selectedStopName, setSelectedStopName] = useState(null);
   const [routeOptions, setRouteOptions] = useState([]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
+  const [searchPanelMinHeight, setSearchPanelMinHeight] = useState(null);
+  const searchRoutePanelRef = useRef(null);
 
   const transitionSearchPanel = (update) => {
     if (typeof document.startViewTransition === 'function') {
@@ -398,7 +400,16 @@ export default function App() {
   };
 
   const selectStop = (stop) => {
+    const panel = searchRoutePanelRef.current?.getBoundingClientRect();
+    const availablePanelHeight = panel
+      ? window.innerHeight - panel.top - 16
+      : 0;
+    const panelHeight = panel
+      ? Math.min(availablePanelHeight, Math.max(Math.min(panel.height, 420), 400))
+      : null;
+
     transitionSearchPanel(() => {
+      if (panelHeight) setSearchPanelMinHeight(panelHeight);
       setShowRecentStops(false);
       setRecentStops(currentStops => [
         stop,
@@ -445,6 +456,7 @@ export default function App() {
       setSearchQuery('');
       setStopResults([]);
       setRouteOptions([]);
+      setSearchPanelMinHeight(null);
     });
   };
 
@@ -713,7 +725,11 @@ export default function App() {
             <Search className="mr-2 w-5 h-5 text-violet-300" /> Új járat hozzáadása
           </h2>
 
-          <div className="search-route-panel">
+          <div
+            ref={searchRoutePanelRef}
+            className="search-route-panel"
+            style={searchPanelMinHeight ? { height: `${searchPanelMinHeight}px` } : undefined}
+          >
           {!selectedStopName ? (
             <>
               <input
@@ -797,7 +813,7 @@ export default function App() {
               )}
             </>
           ) : (
-            <div className="animate-in fade-in slide-in-from-right-4">
+            <div className="flex h-full min-h-0 flex-col animate-in fade-in slide-in-from-right-4">
               <div className="flex justify-between items-center mb-4 border-b border-zinc-700 pb-2">
                 <h3 className="font-bold text-violet-300 flex items-center text-lg pr-4 truncate">
                   <MapPin className="w-5 h-5 mr-2 flex-shrink-0" /> <span className="truncate">{selectedStopName}</span>
@@ -806,6 +822,7 @@ export default function App() {
                   onClick={() => transitionSearchPanel(() => {
                     setSelectedStopName(null);
                     setRouteOptions([]);
+                    setSearchPanelMinHeight(null);
                   })}
                   className="p-1 bg-zinc-700 rounded-full hover:bg-zinc-600 flex-shrink-0 transition-colors"
                 >
@@ -814,11 +831,11 @@ export default function App() {
               </div>
 
               {isLoadingRoutes ? (
-                <div className="text-center py-6 text-zinc-400 flex justify-center items-center">
+                <div className="min-h-0 flex-1 text-center py-6 text-zinc-400 flex justify-center items-center">
                   <Clock className="animate-spin w-5 h-5 mr-2" /> Járatok betöltése...
                 </div>
               ) : (
-                <div className="max-h-72 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                <div className="max-h-[22rem] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                   {routeOptions.map((opt, idx) => (
                     <button
                       key={idx}
