@@ -410,7 +410,7 @@ export default function App() {
     };
 
 
-    setFavorites([...favorites, newFavorite]);
+    setFavorites([newFavorite, ...favorites]);
 
     setSelectedStopName(null);
     setSearchQuery('');
