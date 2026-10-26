@@ -426,6 +426,26 @@ html {
   animation: favorite-enter 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes favorite-empty-appear {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.favorite-empty-enter {
+  border: 1px dashed #3f3f46;
+  border-radius: 0.75rem;
+  background-color: #27272a;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #71717a;
+  animation: favorite-empty-appear 240ms ease-out both;
+}
+
 .favorite-animation-content {
   min-height: 0;
   overflow: hidden;
@@ -449,6 +469,10 @@ html {
   ::view-transition-group(search-route-panel),
   ::view-transition-old(search-route-panel),
   ::view-transition-new(search-route-panel) {
+    animation-duration: 1ms !important;
+  }
+
+  .favorite-empty-enter {
     animation-duration: 1ms !important;
   }
 

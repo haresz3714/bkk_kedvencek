@@ -775,62 +775,57 @@ export default function App() {
       favoritesListRef.current?.querySelectorAll('[data-favorite-slot]') ?? []
     ).find(favoriteSlot => favoriteSlot.dataset.favoriteId === String(id));
 
-    if (!slot || typeof slot.animate !== 'function') {
+    if (!(slot instanceof HTMLElement)) {
       finishRemovingFavorite(id);
       return;
     }
 
-    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 320;
-    const styles = window.getComputedStyle(slot);
-    const nextSlot = slot.nextElementSibling;
-    let gapAnimation;
-    const animations = [slot.animate(
-      [
-        {
-          height: `${slot.getBoundingClientRect().height}px`,
-          marginBlockStart: styles.marginBlockStart,
-          opacity: styles.opacity
-        },
-        { height: '0px', marginBlockStart: '0px', opacity: 0 }
-      ],
-      {
-        duration,
-        easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
-        fill: 'forwards'
-      }
-    )];
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      finishRemovingFavorite(id);
+      return;
+    }
 
+    const duration = 320;
+    const slotHeight = slot.getBoundingClientRect().height;
+    const nextSlot = slot.nextElementSibling;
     slot.style.overflow = 'hidden';
+    slot.style.transition = 'none';
+    slot.style.height = `${slotHeight}px`;
     slot.style.minHeight = '0';
     slot.style.flex = '0 0 auto';
+    slot.getBoundingClientRect();
 
     if (!slot.previousElementSibling && nextSlot instanceof HTMLElement) {
       const nextStyles = window.getComputedStyle(nextSlot);
-      gapAnimation = nextSlot.animate(
-        [
-          { marginBlockStart: nextStyles.marginBlockStart },
-          { marginBlockStart: '0px' }
-        ],
-        {
-          duration,
-          easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
-          fill: 'forwards'
-        }
-      );
-      animations.push(gapAnimation);
+      nextSlot.style.transition = 'none';
+      nextSlot.style.marginBlockStart = nextStyles.marginBlockStart;
+      nextSlot.getBoundingClientRect();
+      nextSlot.style.transition = `margin-block-start ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`;
     }
 
-    let remainingAnimations = animations.length;
-    const finishAfterAnimations = () => {
-      remainingAnimations -= 1;
-      if (remainingAnimations === 0) {
-        finishRemovingFavorite(id);
-        if (gapAnimation) requestAnimationFrame(() => gapAnimation.cancel());
-      }
+    let finished = false;
+    let fallbackTimeout;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(fallbackTimeout);
+      slot.removeEventListener('transitionend', handleTransitionEnd);
+      finishRemovingFavorite(id);
     };
-    animations.forEach(animation => {
-      animation.onfinish = finishAfterAnimations;
-      animation.oncancel = finishAfterAnimations;
+    const handleTransitionEnd = (event) => {
+      if (event.target === slot && event.propertyName === 'height') finish();
+    };
+
+    slot.addEventListener('transitionend', handleTransitionEnd);
+    slot.style.transition = `height ${duration}ms cubic-bezier(0.4, 0, 0.2, 1), margin-block-start ${duration}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${duration}ms ease`;
+    fallbackTimeout = window.setTimeout(finish, duration + 100);
+    requestAnimationFrame(() => {
+      slot.style.height = '0px';
+      slot.style.marginBlockStart = '0px';
+      slot.style.opacity = '0';
+      if (!slot.previousElementSibling && nextSlot instanceof HTMLElement) {
+        nextSlot.style.marginBlockStart = '0px';
+      }
     });
   };
 
@@ -1259,7 +1254,7 @@ export default function App() {
         </p>
 
         {favorites.length === 0 ? (
-          <div className="text-center text-zinc-500 py-8 bg-zinc-800 rounded-xl border border-zinc-700 border-dashed">
+          <div className="favorite-empty-enter">
             Keresd meg a megállódat, és adj hozzá járatokat!
           </div>
         ) : (
