@@ -446,6 +446,12 @@ html {
   animation: favorite-empty-appear 240ms ease-out both;
 }
 
+.app-shell[data-theme="light"] .favorite-empty-enter {
+  border-color: #d5e0e7;
+  background-color: #ffffff;
+  color: #718693;
+}
+
 .favorite-animation-content {
   min-height: 0;
   overflow: hidden;
