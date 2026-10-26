@@ -328,39 +328,34 @@ export default function App() {
 
               sched.directions?.forEach(dir => {
                 const dirId = dir.directionId;
-
-                // Összeszedjük a tényleges napi indulásokhoz tartozó célállomásokat
-                const headsigns = dir.stopTimes?.map(st => st.stopHeadsign).filter(Boolean) || [];
-
-                let displayHeadsign = "Ismeretlen";
-                if (headsigns.length > 0) {
-                  const counts = {};
-                  let maxCount = 0;
-
-                  // Megkeressük a leggyakrabban előforduló célállomást
-                  headsigns.forEach(hs => {
-                    counts[hs] = (counts[hs] || 0) + 1;
-                    if (counts[hs] > maxCount) {
-                      maxCount = counts[hs];
-                      displayHeadsign = hs;
-                    }
-                  });
-                }
-
-                // Azonosító: Járatszám + Irány (Nem a szöveg!)
                 const key = `${route.id}-${dirId}`;
-                if (!optionsMap.has(key)) {
-                  optionsMap.set(key, {
-                    stopId: stopId,
+                let option = optionsMap.get(key);
+                if (!option) {
+                  option = {
                     routeId: route.id,
                     route: route.shortName,
                     directionId: dirId,
-                    headsign: displayHeadsign,
-                    type: route.type,             
-                    color: route.color,          
-                    textColor: route.textColor    
-                  });
+                    type: route.type,
+                    color: route.color,
+                    textColor: route.textColor,
+                    headsignCounts: new Map(),
+                    stopIdCounts: new Map()
+                  };
+                  optionsMap.set(key, option);
                 }
+
+                const stopTimes = dir.stopTimes || [];
+                option.stopIdCounts.set(
+                  stopId,
+                  (option.stopIdCounts.get(stopId) || 0) + stopTimes.length
+                );
+                stopTimes.forEach(stopTime => {
+                  if (!stopTime.stopHeadsign) return;
+                  option.headsignCounts.set(
+                    stopTime.stopHeadsign,
+                    (option.headsignCounts.get(stopTime.stopHeadsign) || 0) + 1
+                  );
+                });
               });
             });
           }
@@ -371,7 +366,25 @@ export default function App() {
 
       await Promise.all(fetchPromises);
 
-      const options = Array.from(optionsMap.values());
+      const options = Array.from(optionsMap.values()).map(option => {
+        const [headsign] = Array.from(option.headsignCounts.entries()).sort((a, b) =>
+          b[1] - a[1] || a[0].localeCompare(b[0], 'hu')
+        )[0] || [];
+        const [stopId] = Array.from(option.stopIdCounts.entries()).sort((a, b) =>
+          b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))
+        )[0] || [];
+
+        return {
+          stopId,
+          routeId: option.routeId,
+          route: option.route,
+          directionId: option.directionId,
+          headsign: headsign || "Ismeretlen",
+          type: option.type,
+          color: option.color,
+          textColor: option.textColor
+        };
+      });
       const tramRouteNames = new Set(
         options.filter(option => option.type === 'TRAM').map(option => option.route)
       );
