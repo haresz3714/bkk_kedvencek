@@ -261,6 +261,7 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [stopResults, setStopResults] = useState([]);
+  const [displayedStopResults, setDisplayedStopResults] = useState([]);
   const [recentStops, setRecentStops] = useState(() => {
     const saved = localStorage.getItem('bkk_recent_stops');
     return saved ? JSON.parse(saved) : [];
@@ -280,6 +281,11 @@ export default function App() {
   const [trafficAlertsError, setTrafficAlertsError] = useState(null);
   const [trafficAlertsRefreshKey, setTrafficAlertsRefreshKey] = useState(0);
   const [selectedAlertFilters, setSelectedAlertFilters] = useState(() => new Set());
+  const showStopResults = searchQuery.length >= 3 && stopResults.length > 0;
+  const showRecentStopsPanel = showRecentStops && recentStops.length > 0;
+  const isSearchSuggestionsOpen =
+    showStopResults ||
+    (showRecentStopsPanel && isSearchFocused && searchQuery.length === 0);
 
   const transitionSearchPanel = (update) => {
     if (typeof document.startViewTransition !== 'function') {
@@ -554,7 +560,12 @@ export default function App() {
           });
 
           const grouped = Array.from(stopsMap.entries()).map(([name, ids]) => ({ name, stopIds: ids }));
-          setStopResults(grouped.slice(0, 8));
+          const results = grouped.slice(0, 8);
+          setStopResults(results);
+          if (results.length > 0) {
+            setDisplayedStopResults(results);
+            setShowRecentStops(false);
+          }
         }
       } catch (e) {
         console.error("Keresési hiba:", e);
@@ -731,6 +742,7 @@ export default function App() {
       setSelectedStopName(null);
       setSearchQuery('');
       setStopResults([]);
+      setDisplayedStopResults([]);
       setRouteOptions([]);
       setSearchPanelMinHeight(null);
     });
@@ -1041,7 +1053,7 @@ export default function App() {
         </div>
 
         <div className="bg-zinc-800 p-4 rounded-xl mb-6 shadow-lg border border-zinc-700">
-          <h2 className="text-lg font-semibold mb-3 flex items-center">
+          <h2 className="text-lg font-semibold mb-4 flex items-center">
             <Search className="mr-2 w-5 h-5 text-violet-300" /> Új járat hozzáadása
           </h2>
 
@@ -1057,8 +1069,9 @@ export default function App() {
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
-                  if (e.target.value) setShowRecentStops(false);
-                  else if (recentStops.length > 0 && isSearchFocused) setShowRecentStops(true);
+                  if (!e.target.value && recentStops.length > 0 && isSearchFocused) {
+                    setShowRecentStops(true);
+                  }
                 }}
                 onFocus={() => {
                   setIsSearchFocused(true);
@@ -1066,71 +1079,76 @@ export default function App() {
                 }}
                 onBlur={() => setIsSearchFocused(false)}
                 placeholder="Megálló keresése..."
-                className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg mb-2 transition-all placeholder:italic"
+                className="w-full bg-zinc-700 text-white px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-violet-400 border border-zinc-600 text-lg transition-all placeholder:italic"
               />
 
-              {stopResults.length > 0 && (
-                <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2 search-results-enter">
-                  {stopResults.map(stop => (
-                    <button
-                      key={stop.name}
-                      onClick={() => selectStop(stop)}
-                      className="w-full flex items-center p-3 border-b border-zinc-600 hover:bg-zinc-600 transition-colors text-left"
-                    >
-                      <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
-                      <span className="font-bold text-base md:text-lg">{stop.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div
+                className={`search-suggestions${isSearchSuggestionsOpen ? ' is-open' : ''}`}
+                aria-hidden={!isSearchSuggestionsOpen}
+                inert={!isSearchSuggestionsOpen}
+                onTransitionEnd={(event) => {
+                  if (
+                    event.target !== event.currentTarget ||
+                    event.propertyName !== 'grid-template-rows' ||
+                    isSearchSuggestionsOpen
+                  ) return;
 
-              {showRecentStops && recentStops.length > 0 && (
-                <div
-                  onAnimationEnd={(event) => {
-                    if (
-                      event.animationName === 'recent-panel-exit' &&
-                      (!isSearchFocused || searchQuery.length > 0)
-                    ) {
-                      setShowRecentStops(false);
-                    }
-                  }}
-                  className={`bg-zinc-700 rounded-lg overflow-hidden mt-2 ${
-                    isSearchFocused && searchQuery.length === 0
-                      ? 'recent-panel-enter'
-                      : 'recent-panel-exit'
-                  }`}
-                >
-                  <h3 className="px-3 pt-3 pb-2 text-sm font-semibold text-zinc-300">Legutóbbi megállók</h3>
-                  {recentStops.map(stop => (
-                    <div
-                      key={stop.name}
-                      onAnimationEnd={() => finishRemovingRecentStop(stop.name)}
-                      className={`flex items-center border-t border-zinc-600 ${
-                        removingRecentStops.has(stop.name) ? 'recent-stop-exit' : ''
-                      }`}
-                    >
-                      <button
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => selectStop(stop)}
-                        disabled={removingRecentStops.has(stop.name)}
-                        className="flex-1 flex items-center p-3 hover:bg-zinc-600 transition-colors text-left min-w-0"
-                      >
-                        <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
-                        <span className="font-bold text-base md:text-lg truncate">{stop.name}</span>
-                      </button>
-                      <button
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => removeRecentStop(stop.name)}
-                        disabled={removingRecentStops.has(stop.name)}
-                        aria-label={`${stop.name} törlése az előzményekből`}
-                        className="flex w-12 flex-shrink-0 self-stretch items-center justify-center text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-400"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
+                  setDisplayedStopResults([]);
+                  if (!isSearchFocused || searchQuery.length > 0) setShowRecentStops(false);
+                }}
+              >
+                <div className="search-suggestions-content">
+                  {displayedStopResults.length > 0 && (
+                    <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2">
+                      {displayedStopResults.map(stop => (
+                        <button
+                          key={stop.name}
+                          onClick={() => selectStop(stop)}
+                          className="w-full flex items-center p-3 border-b border-zinc-600 hover:bg-zinc-600 transition-colors text-left"
+                        >
+                          <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
+                          <span className="font-bold text-base md:text-lg">{stop.name}</span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  )}
+
+                  {showRecentStopsPanel && (
+                    <div className="bg-zinc-700 rounded-lg overflow-hidden mt-2">
+                      <h3 className="px-3 pt-3 pb-2 text-sm font-semibold text-zinc-300">Legutóbbi megállók</h3>
+                      {recentStops.map(stop => (
+                        <div
+                          key={stop.name}
+                          onAnimationEnd={() => finishRemovingRecentStop(stop.name)}
+                          className={`flex items-center border-t border-zinc-600 ${
+                            removingRecentStops.has(stop.name) ? 'recent-stop-exit' : ''
+                          }`}
+                        >
+                          <button
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectStop(stop)}
+                            disabled={removingRecentStops.has(stop.name)}
+                            className="flex-1 flex items-center p-3 hover:bg-zinc-600 transition-colors text-left min-w-0"
+                          >
+                            <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
+                            <span className="font-bold text-base md:text-lg truncate">{stop.name}</span>
+                          </button>
+                          <button
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => removeRecentStop(stop.name)}
+                            disabled={removingRecentStops.has(stop.name)}
+                            aria-label={`${stop.name} törlése az előzményekből`}
+                            className="flex w-12 flex-shrink-0 self-stretch items-center justify-center text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-400"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+
             </>
           ) : (
             <div className="flex h-full min-h-0 flex-col animate-in fade-in slide-in-from-right-4">
