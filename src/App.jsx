@@ -871,6 +871,11 @@ export default function App() {
       clearTimeout(fallbackTimeout);
       slot.removeEventListener('transitionend', handleTransitionEnd);
       finishRemovingFavorite(id);
+      if (nextSlot instanceof HTMLElement) {
+        requestAnimationFrame(() => {
+          if (nextSlot.isConnected) nextSlot.style.removeProperty('margin-block-start');
+        });
+      }
     };
     const handleTransitionEnd = (event) => {
       if (event.target === slot && event.propertyName === 'height') finish();
