@@ -1153,7 +1153,7 @@ export default function App() {
   const hasSelectedAlertFilters = selectedAlertFilters.size > 0;
 
   return (
-    <div data-theme={theme} className="app-shell min-h-screen bg-zinc-900 text-white p-4 font-sans pb-20 flex flex-col">
+    <div data-theme={theme} className="app-shell min-h-dvh bg-zinc-900 text-white p-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-[calc(5rem+env(safe-area-inset-bottom,0px))] pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] font-sans flex flex-col">
       <div className="max-w-md mx-auto w-full flex-1">
         <div className="relative mb-6 flex items-center justify-center">
           <h1 className="text-2xl font-bold text-center text-violet-300">BudapestGO <i>Rapid</i></h1>
@@ -1162,7 +1162,7 @@ export default function App() {
             onClick={() => setTheme(currentTheme => currentTheme === 'dark' ? 'light' : 'dark')}
             aria-label={theme === 'dark' ? 'Világos mód bekapcsolása' : 'Sötét mód bekapcsolása'}
             title={theme === 'dark' ? 'Világos mód' : 'Sötét mód'}
-            className="absolute right-0 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-violet-300 transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+            className="absolute right-0 flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-zinc-800 text-violet-300 transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
           >
             {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </button>
@@ -1220,10 +1220,10 @@ export default function App() {
                         <button
                           key={stop.name}
                           onClick={() => selectStop(stop)}
-                          className="w-full flex items-center p-3 border-b border-zinc-600 hover:bg-zinc-600 transition-colors text-left"
+                          className="w-full min-w-0 flex items-center p-3 border-b border-zinc-600 hover:bg-zinc-600 transition-colors text-left"
                         >
                           <MapPin className="w-5 h-5 mr-3 text-zinc-400 flex-shrink-0" />
-                          <span className="font-bold text-base md:text-lg">{stop.name}</span>
+                          <span className="min-w-0 flex-1 truncate font-bold text-base md:text-lg">{stop.name}</span>
                         </button>
                       ))}
                     </div>
@@ -1269,8 +1269,8 @@ export default function App() {
           ) : (
             <div className="flex h-full min-h-0 flex-col animate-in fade-in slide-in-from-right-4">
               <div className="flex justify-between items-center mb-4 border-b border-zinc-700 pb-2">
-                <h3 className="font-bold text-violet-300 flex items-center text-lg pr-4 truncate">
-                  <MapPin className="w-5 h-5 mr-2 flex-shrink-0" /> <span className="truncate">{selectedStopName}</span>
+                <h3 className="min-w-0 flex-1 font-bold text-violet-300 flex items-center text-lg pr-4 truncate">
+                  <MapPin className="w-5 h-5 mr-2 flex-shrink-0" /> <span className="min-w-0 truncate">{selectedStopName}</span>
                 </h3>
                 <button
                   onClick={() => transitionSearchPanel(() => {
@@ -1278,7 +1278,7 @@ export default function App() {
                     setRouteOptions([]);
                     setSearchPanelMinHeight(null);
                   })}
-                  className="p-1 bg-zinc-700 rounded-full hover:bg-zinc-600 flex-shrink-0 transition-colors"
+                  className="flex h-11 w-11 min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded-full bg-zinc-700 transition-colors hover:bg-zinc-600"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1374,7 +1374,7 @@ export default function App() {
                       touchAction: 'none'
                     } : undefined}
                   >
-                    <div className="flex-1 pr-2 overflow-hidden">
+                    <div className="min-w-0 flex-1 pr-2 overflow-hidden">
                       <h3 className="font-bold flex items-center text-base md:text-lg truncate">
                         <MapPin className="w-4 h-4 mr-1 text-zinc-400 flex-shrink-0" />
                         <span className="truncate">{fav.stopName}</span>
@@ -1411,7 +1411,7 @@ export default function App() {
                         onClick={() => removeFavorite(fav.id)}
                         disabled={removingFavoriteIds.has(fav.id)}
                         aria-label={`${fav.stopName} ${fav.route} törlése a kedvencekből`}
-                        className="text-red-400 hover:text-red-300 hover:bg-zinc-700 p-2 rounded-full transition-colors h-10 w-10 flex items-center justify-center disabled:pointer-events-none"
+                        className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-2 text-red-400 transition-colors hover:bg-zinc-700 hover:text-red-300 disabled:pointer-events-none"
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
@@ -1455,7 +1455,7 @@ export default function App() {
                 disabled={isLoadingTrafficAlerts}
                 aria-label="Forgalmi változások frissítése"
                 title="Frissítés"
-                className="mr-3 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:opacity-50"
+                className="mr-3 flex h-11 w-11 min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${isLoadingTrafficAlerts ? 'animate-spin' : ''}`} />
               </button>
@@ -1478,7 +1478,7 @@ export default function App() {
                       type="button"
                       aria-pressed={isSelected}
                       onClick={() => toggleAlertFilter(filter.id)}
-                      className={`traffic-alert-filter rounded-full border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
+                      className={`traffic-alert-filter min-h-[44px] rounded-full border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
                         isSelected
                           ? 'border-violet-400 bg-violet-700 text-white'
                           : 'border-zinc-600 bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
@@ -1501,7 +1501,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={refreshTrafficAlerts}
-                    className="mt-2 rounded-lg bg-zinc-700 px-4 py-2 text-sm font-semibold transition-colors hover:bg-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                    className="mt-2 min-h-[44px] rounded-lg bg-zinc-700 px-4 py-2 text-sm font-semibold transition-colors hover:bg-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                   >
                     Újrapróbálás
                   </button>
@@ -1628,7 +1628,7 @@ export default function App() {
             href="https://github.com/haresz3714"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-violet-300 underline underline-offset-2 hover:text-white"
+            className="inline-flex min-h-[44px] items-center text-violet-300 underline underline-offset-2 hover:text-white"
           >
             github.com/haresz3714
           </a>
