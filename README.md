@@ -6,8 +6,9 @@ Reszponzív webalkalmazás a budapesti közösségi közlekedés megállóinak �
 
 ## Funkciók
 
-- **Megálló- és járatkeresés:** Keress a BKK megállói között, válassz járatot és irányt, majd add hozzá a kedvenceidhez.
+- **Megálló- és járatkeresés:** Keress a BKK megállói között, válassz járatot és irányt, majd add hozzá a kedvenceidhez. Az egymáshoz tartozó megállókat (például Széll Kálmán tér és Széll Kálmán tér M) a keresés egy találatként kezeli.
 - **Élő indulási adatok:** A kedvenc járatok indulásai automatikusan, 30 másodpercenként frissülnek.
+- **Mentett útvonalak:** Kapcsold össze a két járatból álló útvonalaidat, add meg az átszálláshoz szükséges sétát, és kövesd a várható csatlakozást élő adatok alapján.
 - **Kedvencek kezelése:** Tartsd meg a gyakran használt megállókat és járatokat, rendezd át a kedvenceket, vagy töröld őket.
 - **Legutóbbi megállók:** A korábban megnyitott megállók gyorsan újra elérhetők.
 - **Forgalmi változások:** Böngészd és közlekedési mód szerint szűrd a BKK közleményeit.
@@ -24,6 +25,46 @@ Reszponzív webalkalmazás a budapesti közösségi közlekedés megállóinak �
 - **Lucide React** – ikonok
 - **BKK nyilvános API** – megálló-, menetrendi, indulási és forgalmi adatok
 - **Böngésző LocalStorage API** – kedvencek, témabeállítás és legutóbbi megállók helyi tárolása
+
+## Mentett útvonalak
+
+A „Mentett útvonalak” nézetben két járatot, az induló-, az első jármű leszálló-, a második jármű felszálló- és a célmegállót, valamint az átszálláshoz szükséges séta perceit adhatod meg. A második jármű felszállóhelye alapértelmezés szerint megegyezik az első jármű leszállóhelyével, de külön is beállítható. Mindkét útvonalszakaszhoz több, azonos irányban közlekedő járatot is kiválaszthatsz; az app ezek közül keresi meg a legkorábbi megfelelő csatlakozást, és a járművek sorrendjénél, ikon- és színjelölésénél a mentett indulások nézetével közös logikát használja. Az útvonalak a böngésző `localStorage` tárában, a `savedRoutes` kulcs alatt maradnak meg. A rendszer a járatok megállóit 30 másodpercenként frissíti, majd az első jármű leszállóhelyi érkezése és a megadott sétaidő után keres megfelelő indulást a második jármű felszállóhelyén.
+
+Egy mentett útvonal adatszerkezete például:
+
+```json
+{
+  "id": "1761662400000-a1b2c3",
+  "name": "Reggeli munkába járás",
+  "transferWalkMinutes": 5,
+  "leg1": {
+    "startStopId": "stop-id-start",
+    "startStopIds": ["stop-id-start"],
+    "startStopName": "Mechwart liget",
+    "routeId": "route-id-4",
+    "route": "4",
+    "directionId": "1",
+    "headsign": "Széll Kálmán tér",
+    "type": "TRAM",
+    "transferStopId": "stop-id-transfer",
+    "transferStopIds": ["stop-id-transfer"],
+    "transferStopName": "Jászai Mari tér"
+  },
+  "leg2": {
+    "startStopId": "stop-id-transfer",
+    "startStopIds": ["stop-id-transfer"],
+    "startStopName": "Jászai Mari tér",
+    "routeId": "route-id-2",
+    "route": "2",
+    "directionId": "0",
+    "headsign": "Közvágóhíd",
+    "type": "TRAM",
+    "destinationStopId": "stop-id-destination",
+    "destinationStopIds": ["stop-id-destination"],
+    "destinationStopName": "Fővám tér"
+  }
+}
+```
 
 ### Fejlesztést segítő AI-eszközök
 

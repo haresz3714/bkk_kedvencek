@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { Search, MapPin, Clock, Trash2, TramFront, Bus, X, Sun, Moon, Bell, ChevronDown, RefreshCw } from 'lucide-react';
+import { Search, MapPin, Clock, Trash2, X, Sun, Moon, Bell, ChevronDown, RefreshCw, Route } from 'lucide-react';
+import SavedRoutes from './SavedRoutes.jsx';
+import VehicleBadge from './VehicleBadge.jsx';
+import { groupStopsByName } from './stopGroups.js';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 const ALERT_FILTERS = [
@@ -12,18 +15,6 @@ const ALERT_FILTERS = [
   { id: 'night', label: 'Éjszakai' },
   { id: 'other', label: 'Egyéb' }
 ];
-const OFFICIAL_ROUTE_COLORS = {
-  M1: { background: '#FFD800', text: '#000000' },
-  M2: { background: '#FF1C24', text: '#FFFFFF' },
-  M3: { background: '#005CA5', text: '#FFFFFF' },
-  M4: { background: '#19A74E', text: '#FFFFFF' },
-  H5: { background: '#821066', text: '#FFFFFF' },
-  H6: { background: '#884200', text: '#FFFFFF' },
-  H7: { background: '#EE7203', text: '#FFFFFF' },
-  H8: { background: '#E56EA6', text: '#FFFFFF' },
-  H9: { background: '#E56EA6', text: '#FFFFFF' }
-};
-
 const getTranslatedAlertText = (value) =>
   value?.translations?.hu || value?.translations?.en || value?.someTranslation || '';
 
@@ -257,6 +248,10 @@ export default function App() {
   const [theme, setTheme] = useState(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   );
+  const [dashboardTab, setDashboardTab] = useState('departures');
+  const [displayedDashboardTab, setDisplayedDashboardTab] = useState('departures');
+  const [isDashboardContentExiting, setIsDashboardContentExiting] = useState(false);
+  const dashboardTransitionTimeoutRef = useRef(null);
   const [favorites, setFavorites] = useState(() => {
     const saved = localStorage.getItem('bkk_favorites');
     return saved ? JSON.parse(saved) : [];
@@ -305,6 +300,19 @@ export default function App() {
     }
 
     return document.startViewTransition(() => flushSync(update));
+  };
+
+  const switchDashboardTab = (nextTab) => {
+    if (nextTab === dashboardTab) return;
+
+    setDashboardTab(nextTab);
+    setIsDashboardContentExiting(true);
+    window.clearTimeout(dashboardTransitionTimeoutRef.current);
+    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 140;
+    dashboardTransitionTimeoutRef.current = window.setTimeout(() => {
+      setDisplayedDashboardTab(nextTab);
+      setIsDashboardContentExiting(false);
+    }, duration);
   };
 
   useEffect(() => {
@@ -619,18 +627,7 @@ export default function App() {
         if (data.code === 200 && data.data) {
           const stopIds = data.data.entry.stopIds || [];
           const stopsRef = data.data.references.stops || {};
-          const stopsMap = new Map();
-
-          stopIds.forEach(id => {
-            const stop = stopsRef[id];
-            if (!stop?.name) return;
-
-            const ids = stopsMap.get(stop.name) || [];
-            ids.push(stop.id);
-            stopsMap.set(stop.name, ids);
-          });
-
-          const grouped = Array.from(stopsMap.entries()).map(([name, ids]) => ({ name, stopIds: ids }));
+          const grouped = groupStopsByName(stopIds, stopsRef);
           const results = grouped.slice(0, 8);
           setStopResults(results);
           if (results.length > 0) {
@@ -1072,34 +1069,7 @@ export default function App() {
   };
 
   const renderVehicleBadge = (route, type, color, textColor) => {
-    const officialColors = Object.hasOwn(OFFICIAL_ROUTE_COLORS, route)
-      ? OFFICIAL_ROUTE_COLORS[route]
-      : undefined;
-    const bgColor = officialColors?.background || (color ? `#${color}` : '#009FE3');
-    const txtColor = officialColors?.text || (textColor ? `#${textColor}` : '#FFFFFF');
-    const isBadgeOnly = Boolean(officialColors) ||
-      type === 'SUBWAY' || type === 'SUBURBAN_RAILWAY' || type === 'RAIL';
-
-    if (isBadgeOnly) {
-      return (
-        <span
-          className="px-2 py-0.5 rounded text-sm font-bold mr-2 flex items-center justify-center flex-shrink-0 min-w-[2.5rem]"
-          style={{ backgroundColor: bgColor, color: txtColor }}
-        >
-          {route}
-        </span>
-      );
-    }
-
-    return (
-      <span
-        className="px-2 py-0.5 rounded text-sm font-bold mr-2 flex items-center flex-shrink-0"
-        style={{ backgroundColor: bgColor, color: txtColor }}
-      >
-        {type === 'TRAM' ? <TramFront className="w-3 h-3 mr-1" /> : <Bus className="w-3 h-3 mr-1" />}
-        {route}
-      </span>
-    );
+    return <VehicleBadge route={route} type={type} color={color} textColor={textColor} />;
   };
 
   const formatAlertDate = (timestamp) => {
@@ -1168,6 +1138,37 @@ export default function App() {
           </button>
         </div>
 
+        <div className="mode-switcher mb-4 grid grid-cols-2 gap-2 rounded-xl border border-zinc-700 bg-zinc-800 p-1" role="group" aria-label="Mentett közlekedési adatok">
+          <span
+            aria-hidden="true"
+            className={`mode-switcher-indicator${dashboardTab === 'routes' ? ' is-routes' : ''}`}
+          />
+          <button
+            type="button"
+            aria-pressed={dashboardTab === 'departures'}
+            onClick={() => switchDashboardTab('departures')}
+            className={`mode-switcher-button relative z-10 flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
+              dashboardTab === 'departures' ? 'text-white' : 'text-zinc-300 hover:bg-zinc-700'
+            }`}
+          >
+            <Clock className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate">Mentett indulások</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={dashboardTab === 'routes'}
+            onClick={() => switchDashboardTab('routes')}
+            className={`mode-switcher-button relative z-10 flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
+              dashboardTab === 'routes' ? 'text-white' : 'text-zinc-300 hover:bg-zinc-700'
+            }`}
+          >
+            <Route className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate">Mentett útvonalak</span>
+          </button>
+        </div>
+
+        <div className={`dashboard-content${isDashboardContentExiting ? ' is-exiting' : ''}`}>
+        {displayedDashboardTab === 'departures' && (
         <div className="bg-zinc-800 p-4 rounded-xl mb-6 shadow-lg border border-zinc-700">
           <h2 className="text-lg font-semibold mb-4 flex items-center">
             <Search className="mr-2 w-5 h-5 text-violet-300" /> Új járat hozzáadása
@@ -1310,21 +1311,26 @@ export default function App() {
           )}
           </div>
         </div>
+        )}
 
-        <h2 className="text-lg font-semibold mb-3 flex items-center">
-          <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
-        </h2>
-        <p className="-mt-2 mb-3 text-xs text-zinc-500">
-          Sorrend átrendezése: Számítógépen fogd meg, majd húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
-        </p>
-
-        {favorites.length === 0 ? (
-          <div className="favorite-empty-enter">
-            Keresd meg a megállódat, és adj hozzá járatokat!
-          </div>
+        {displayedDashboardTab === 'routes' ? (
+          <SavedRoutes />
         ) : (
-          <div ref={favoritesListRef} className="favorite-list flex flex-col">
-            {favorites.map((fav, index) => {
+          <>
+            <h2 className="text-lg font-semibold mb-3 flex items-center">
+              <Clock className="mr-2 w-5 h-5 text-violet-300" /> Mentett indulások
+            </h2>
+            <p className="-mt-2 mb-3 text-xs text-zinc-500">
+              Sorrend átrendezése: Számítógépen fogd meg, majd húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
+            </p>
+
+            {favorites.length === 0 ? (
+              <div className="favorite-empty-enter">
+                Keresd meg a megállódat, és adj hozzá járatokat!
+              </div>
+            ) : (
+              <div ref={favoritesListRef} className="favorite-list flex flex-col">
+                {favorites.map((fav, index) => {
               const isDragging = favoriteDrag?.id === fav.id;
               const movesDown = favoriteDrag &&
                 favoriteDrag.targetIndex < favoriteDrag.originalIndex &&
@@ -1419,12 +1425,15 @@ export default function App() {
                   </div>
                 </div>
               );
-            })}
-          </div>
+                })}
+              </div>
+            )}
+            <p className="mt-3 text-center text-xs italic text-zinc-500">
+              A valós végállomások a feltüntetettektől eltérhetnek.
+            </p>
+          </>
         )}
-        <p className="mt-3 text-center text-xs italic text-zinc-500">
-          A valós végállomások a feltüntetettektől eltérhetnek.
-        </p>
+        </div>
 
         <section className="traffic-changes-section mt-6 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-800 shadow-lg">
           <div className="traffic-changes-header flex items-center">
@@ -1478,9 +1487,9 @@ export default function App() {
                       type="button"
                       aria-pressed={isSelected}
                       onClick={() => toggleAlertFilter(filter.id)}
-                      className={`traffic-alert-filter min-h-[44px] rounded-full border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
+                      className={`traffic-alert-filter min-h-[44px] rounded-full border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
                         isSelected
-                          ? 'border-violet-400 bg-violet-700 text-white'
+                          ? 'border-purple-300 bg-purple-600 text-white'
                           : 'border-zinc-600 bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
                       }`}
                     >
