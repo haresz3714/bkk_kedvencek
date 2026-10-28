@@ -4,6 +4,7 @@ import { Search, MapPin, Clock, Trash2, X, Sun, Moon, Bell, ChevronDown, Refresh
 import SavedRoutes from './SavedRoutes.jsx';
 import VehicleBadge from './VehicleBadge.jsx';
 import { groupStopsByName } from './stopGroups.js';
+import { sortRouteOptions } from './routeOptions.js';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 const ALERT_FILTERS = [
@@ -724,28 +725,7 @@ export default function App() {
           textColor: option.textColor
         };
       });
-      const tramRouteNames = new Set(
-        options.filter(option => option.type === 'TRAM').map(option => option.route)
-      );
-      const filteredOptions = options.filter(option =>
-        option.type !== 'BUS' || !tramRouteNames.has(option.route)
-      );
-
-      const getRoutePriority = (option) => {
-        if (
-          ['SUBWAY', 'SUBURBAN_RAILWAY', 'RAIL'].includes(option.type) ||
-          ['M1', 'M2', 'M3', 'M4', 'H5', 'H6', 'H7', 'H8', 'H9'].includes(option.route)
-        ) {
-          return 0;
-        }
-        if (option.type === 'TRAM') return 1;
-        return 2;
-      };
-
-      optionsArr = filteredOptions.sort((a, b) =>
-        getRoutePriority(a) - getRoutePriority(b) ||
-        a.route.localeCompare(b.route, undefined, { numeric: true })
-      );
+      optionsArr = sortRouteOptions(options);
     } catch (e) {
       console.error("Általános hiba az útvonalak feldolgozásakor:", e);
     }

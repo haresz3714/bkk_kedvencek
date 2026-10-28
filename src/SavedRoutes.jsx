@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowRight, Check, Clock, MapPin, Plus, Route, Trash2, X } from 'lucide-react';
 import VehicleBadge from './VehicleBadge.jsx';
 import { groupStopsByName } from './stopGroups.js';
+import { sortRouteOptions } from './routeOptions.js';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 const STORAGE_KEY = 'savedRoutes';
@@ -58,15 +59,6 @@ async function routesServeStops(stopIds, selectedRoutes, signal) {
       )
     )
   ));
-}
-
-function getRoutePriority(option) {
-  if (
-    ['SUBWAY', 'SUBURBAN_RAILWAY', 'RAIL'].includes(option.type) ||
-    ['M1', 'M2', 'M3', 'M4', 'H5', 'H6', 'H7', 'H8', 'H9'].includes(option.route)
-  ) return 0;
-  if (option.type === 'TRAM') return 1;
-  return 2;
 }
 
 function RouteStopPicker({ label, selectedStop, onSelect, onClear }) {
@@ -273,15 +265,7 @@ function RoutePicker({ label, stop, stopLabel, onStopChange, selectedRoutes, onR
             .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'hu'))[0] || [];
           return { ...option, headsign: headsign || 'Ismeretlen' };
         });
-        const tramRouteNames = new Set(
-          options.filter(option => option.type === 'TRAM').map(option => option.route)
-        );
-        setOptions(options
-          .filter(option => option.type !== 'BUS' || !tramRouteNames.has(option.route))
-          .sort((a, b) =>
-            getRoutePriority(a) - getRoutePriority(b) ||
-            a.route.localeCompare(b.route, undefined, { numeric: true })
-          ));
+        setOptions(sortRouteOptions(options));
       } catch (loadError) {
         if (loadError.name === 'AbortError') return;
         console.error('Útvonal járatainak lekérési hiba:', loadError);
