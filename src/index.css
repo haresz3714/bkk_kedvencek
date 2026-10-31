@@ -464,6 +464,44 @@ html {
   animation: saved-route-dialog-exit 200ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
+.route-leg-expansion {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.2, 0.75, 0.25, 1),
+    opacity 220ms ease-out;
+}
+
+.route-leg-expansion.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.route-leg-expansion-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.saved-route-details {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.2, 0.75, 0.25, 1),
+    opacity 180ms ease-out;
+}
+
+.saved-route-details.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.saved-route-details-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .saved-route-list > [data-saved-route-slot] + [data-saved-route-slot] {
   margin-block-start: 0.75rem;
 }
@@ -815,6 +853,14 @@ html {
   .saved-route-dialog,
   .saved-route-dialog.is-closing {
     animation-duration: 1ms !important;
+  }
+
+  .route-leg-expansion {
+    transition-duration: 1ms !important;
+  }
+
+  .saved-route-details {
+    transition-duration: 1ms !important;
   }
 
   .route-search-result {

@@ -8,7 +8,7 @@ Reszponzív webalkalmazás a budapesti közösségi közlekedés megállóinak �
 
 - **Megálló- és járatkeresés:** Keress a BKK megállói között, válassz járatot és irányt, majd add hozzá a kedvenceidhez. Az egymáshoz tartozó megállókat (például Széll Kálmán tér és Széll Kálmán tér M) a keresés egy találatként kezeli.
 - **Élő indulási adatok:** A kedvenc járatok indulásai automatikusan, 30 másodpercenként frissülnek.
-- **Mentett útvonalak:** Kapcsold össze a két járatból álló útvonalaidat, add meg az átszálláshoz szükséges sétát, és kövesd a várható csatlakozást élő adatok alapján.
+- **Mentett útvonalak:** Fűzz össze tetszőleges számú járatot egy útvonallá, add meg az átszállási sétákat, és kövesd a várható csatlakozásokat élő adatok alapján.
 - **Kedvencek kezelése:** Tartsd meg a gyakran használt megállókat és járatokat, rendezd át a kedvenceket, vagy töröld őket.
 - **Legutóbbi megállók:** A korábban megnyitott megállók gyorsan újra elérhetők.
 - **Forgalmi változások:** Böngészd és közlekedési mód szerint szűrd a BKK közleményeit.
@@ -28,7 +28,7 @@ Reszponzív webalkalmazás a budapesti közösségi közlekedés megállóinak �
 
 ## Mentett útvonalak
 
-A „Mentett útvonalak” nézetben két járatot, az induló-, az első jármű leszálló-, a második jármű felszálló- és a célmegállót, valamint az átszálláshoz szükséges séta perceit adhatod meg. A második jármű felszállóhelye alapértelmezés szerint megegyezik az első jármű leszállóhelyével, de külön is beállítható. Mindkét útvonalszakaszhoz több, azonos irányban közlekedő járatot is kiválaszthatsz; az app ezek közül keresi meg a legkorábbi megfelelő csatlakozást, és a járművek sorrendjénél, ikon- és színjelölésénél a mentett indulások nézetével közös logikát használja. Az útvonalak a böngésző `localStorage` tárában, a `savedRoutes` kulcs alatt maradnak meg. A rendszer a járatok megállóit 30 másodpercenként frissíti, majd az első jármű leszállóhelyi érkezése és a megadott sétaidő után keres megfelelő indulást a második jármű felszállóhelyén.
+A „Mentett útvonalak” nézetben tetszőleges számú járatszakaszt fűzhetsz össze. Minden szakaszhoz külön felszálló- és leszállóhelyet, valamint egy vagy több járatot választhatsz; az egymást követő szakaszok között a sétaidő is megadható. A mentett útvonalkártyák összecsukhatók, így a részletes indulási és átszállási adatok csak kibontáskor jelennek meg. Az útvonal a böngésző `localStorage` tárában, a `savedRoutes` kulcs alatt marad meg. A rendszer 30 másodpercenként frissíti a járatok megállóinak élő adatait, és a megadott átszállási idők figyelembevételével keresi meg a teljes útvonal következő teljesíthető csatlakozásait. A korábban elmentett kétjáratos útvonalak továbbra is megjelennek.
 
 Egy mentett útvonal adatszerkezete például:
 
@@ -36,33 +36,49 @@ Egy mentett útvonal adatszerkezete például:
 {
   "id": "1761662400000-a1b2c3",
   "name": "Reggeli munkába járás",
-  "transferWalkMinutes": 5,
-  "leg1": {
-    "startStopId": "stop-id-start",
-    "startStopIds": ["stop-id-start"],
-    "startStopName": "Mechwart liget",
-    "routeId": "route-id-4",
-    "route": "4",
-    "directionId": "1",
-    "headsign": "Széll Kálmán tér",
-    "type": "TRAM",
-    "transferStopId": "stop-id-transfer",
-    "transferStopIds": ["stop-id-transfer"],
-    "transferStopName": "Jászai Mari tér"
-  },
-  "leg2": {
-    "startStopId": "stop-id-transfer",
-    "startStopIds": ["stop-id-transfer"],
-    "startStopName": "Jászai Mari tér",
-    "routeId": "route-id-2",
-    "route": "2",
-    "directionId": "0",
-    "headsign": "Közvágóhíd",
-    "type": "TRAM",
-    "destinationStopId": "stop-id-destination",
-    "destinationStopIds": ["stop-id-destination"],
-    "destinationStopName": "Fővám tér"
-  }
+  "legs": [
+    {
+      "startStopId": "stop-id-start",
+      "startStopIds": ["stop-id-start"],
+      "startStopName": "Mechwart liget",
+      "routes": [
+        {
+          "routeId": "route-id-4",
+          "route": "4",
+          "directionId": "1",
+          "headsign": "Széll Kálmán tér",
+          "type": "TRAM",
+          "stopIds": ["stop-id-start"]
+        }
+      ],
+      "endStopId": "stop-id-transfer",
+      "endStopIds": ["stop-id-transfer"],
+      "endStopName": "Jászai Mari tér"
+    },
+    {
+      "startStopId": "stop-id-transfer",
+      "startStopIds": ["stop-id-transfer"],
+      "startStopName": "Jászai Mari tér",
+      "routes": [
+        {
+          "routeId": "route-id-2",
+          "route": "2",
+          "directionId": "0",
+          "headsign": "Közvágóhíd",
+          "type": "TRAM",
+          "stopIds": ["stop-id-transfer"]
+        }
+      ],
+      "endStopId": "stop-id-destination",
+      "endStopIds": ["stop-id-destination"],
+      "endStopName": "Fővám tér"
+    }
+  ],
+  "transfers": [
+    {
+      "walkMinutes": 5
+    }
+  ]
 }
 ```
 

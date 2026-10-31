@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { Search, MapPin, Clock, Trash2, X, Sun, Moon, Bell, ChevronDown, RefreshCw, Route } from 'lucide-react';
 import SavedRoutes from './SavedRoutes.jsx';
+import DestinationText from './DestinationText.jsx';
 import VehicleBadge from './VehicleBadge.jsx';
 import { groupStopsByName } from './stopGroups.js';
 import { sortRouteOptions } from './routeOptions.js';
@@ -202,47 +203,6 @@ function sanitizeAlertHtml(html) {
   const container = document.createElement('div');
   parsed.body.childNodes.forEach(node => container.appendChild(sanitizeNode(node)));
   return container.innerHTML;
-}
-
-function DestinationText({ children, className = '' }) {
-  const containerRef = useRef(null);
-  const textRef = useRef(null);
-  const [overflowDistance, setOverflowDistance] = useState(0);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const text = textRef.current;
-    if (!container || !text) return;
-
-    const updateOverflow = () => {
-      setOverflowDistance(Math.max(0, text.scrollWidth - container.clientWidth));
-    };
-
-    updateOverflow();
-    const resizeObserver = new ResizeObserver(updateOverflow);
-    resizeObserver.observe(container);
-    resizeObserver.observe(text);
-    return () => resizeObserver.disconnect();
-  }, [children]);
-
-  const scrollStyle = overflowDistance > 0
-    ? {
-        '--destination-shift': `-${overflowDistance}px`,
-        '--destination-duration': `${Math.max(6, overflowDistance / 18)}s`
-      }
-    : undefined;
-
-  return (
-    <span ref={containerRef} className={`min-w-0 flex-1 overflow-hidden ${className}`}>
-      <span
-        ref={textRef}
-        className={`block w-max whitespace-nowrap${overflowDistance > 0 ? ' destination-scroll' : ''}`}
-        style={scrollStyle}
-      >
-        {children}
-      </span>
-    </span>
-  );
 }
 
 export default function App() {
@@ -892,6 +852,7 @@ export default function App() {
     const card = currentTarget.getBoundingClientRect();
     const list = favoritesListRef.current;
     if (!list) return null;
+    const listBounds = list.getBoundingClientRect();
 
     const otherCenters = Array.from(list.querySelectorAll('[data-favorite-slot]'))
       .filter(slot => slot.dataset.favoriteId !== String(favorite.id))
@@ -904,6 +865,10 @@ export default function App() {
       id: favorite.id,
       x,
       y,
+      containerLeft: listBounds.left,
+      containerTop: listBounds.top,
+      positionX: x - listBounds.left,
+      positionY: y - listBounds.top,
       offsetX: x - card.left,
       offsetY: y - card.top,
       width: card.width,
@@ -978,12 +943,16 @@ export default function App() {
         ...drag,
         x: activeTouch.clientX,
         y: activeTouch.clientY,
+        positionX: activeTouch.clientX - drag.containerLeft,
+        positionY: activeTouch.clientY - drag.containerTop,
         targetIndex
       };
       setFavoriteDrag(current => current && ({
         ...current,
         x: activeTouch.clientX,
         y: activeTouch.clientY,
+        positionX: activeTouch.clientX - current.containerLeft,
+        positionY: activeTouch.clientY - current.containerTop,
         targetIndex
       }));
     };
@@ -1037,6 +1006,8 @@ export default function App() {
       ...current,
       x: event.clientX,
       y: event.clientY,
+      positionX: event.clientX - current.containerLeft,
+      positionY: event.clientY - current.containerTop,
       targetIndex
     }));
   };
@@ -1309,7 +1280,7 @@ export default function App() {
                 Keresd meg a megállódat, és adj hozzá járatokat!
               </div>
             ) : (
-              <div ref={favoritesListRef} className="favorite-list flex flex-col">
+              <div ref={favoritesListRef} className="favorite-list relative flex flex-col">
                 {favorites.map((fav, index) => {
               const isDragging = favoriteDrag?.id === fav.id;
               const movesDown = favoriteDrag &&
@@ -1349,12 +1320,12 @@ export default function App() {
                     onTouchStart={(event) => handleFavoriteTouchStart(event, fav, index)}
                     className={`favorite-animation-content bg-zinc-800 p-4 rounded-xl flex justify-between items-center shadow-md border-l-4 border-violet-400 select-none ${
                       isDragging
-                        ? 'fixed z-50 cursor-grabbing scale-[1.02] shadow-2xl ring-2 ring-violet-300'
+                        ? 'absolute z-50 cursor-grabbing scale-[1.02] shadow-2xl ring-2 ring-violet-300'
                         : 'cursor-grab'
                     }`}
                     style={isDragging ? {
-                      left: favoriteDrag.x - favoriteDrag.offsetX,
-                      top: favoriteDrag.y - favoriteDrag.offsetY,
+                      left: favoriteDrag.positionX - favoriteDrag.offsetX,
+                      top: favoriteDrag.positionY - favoriteDrag.offsetY,
                       width: favoriteDrag.width,
                       height: favoriteDrag.height,
                       touchAction: 'none'

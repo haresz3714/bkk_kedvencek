@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDown, ArrowRight, Check, Clock, MapPin, Plus, Route, Trash2, X } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, Clock, MapPin, Plus, Route, Trash2, X } from 'lucide-react';
+import DestinationText from './DestinationText.jsx';
 import VehicleBadge from './VehicleBadge.jsx';
 import { groupStopsByName } from './stopGroups.js';
 import { sortRouteOptions } from './routeOptions.js';
@@ -8,6 +9,7 @@ import { sortRouteOptions } from './routeOptions.js';
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
 const STORAGE_KEY = 'savedRoutes';
 const API_BASE = 'https://go.bkk.hu/api/query/v1/ws/otp/api/where';
+const createEmptyLeg = id => ({ id, startStop: null, routes: [], endStop: null });
 
 function readSavedRoutes() {
   try {
@@ -24,7 +26,7 @@ async function fetchStopData(stopId, signal) {
     key: API_KEY,
     stopId,
     minutesBefore: '0',
-    minutesAfter: '60'
+    minutesAfter: '360'
   });
   const response = await fetch(`${API_BASE}/arrivals-and-departures-for-stop.json?${params}`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -35,7 +37,23 @@ async function fetchStopData(stopId, signal) {
   return result.data;
 }
 
-async function routesServeStops(stopIds, selectedRoutes, signal) {
+async function fetchTripDetails(tripId, serviceDate, signal) {
+  const params = new URLSearchParams({
+    key: API_KEY,
+    tripId
+  });
+  if (serviceDate) params.set('serviceDate', serviceDate);
+  params.set('includeReferences', 'true');
+  const response = await fetch(`${API_BASE}/trip-details.json?${params}`, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const result = await response.json();
+  if (result.code !== 200 || !result.data) {
+    throw new Error(result.text || 'Érvénytelen API-válasz');
+  }
+  return result.data;
+}
+
+async function routesServeStops(stopIds, selectedRoutes, signal, matchDirection = true) {
   const schedulesByStop = await Promise.all(stopIds.map(async stopId => {
     const params = new URLSearchParams({
       key: API_KEY,
@@ -54,9 +72,9 @@ async function routesServeStops(stopIds, selectedRoutes, signal) {
   return selectedRoutes.every(route => schedulesByStop.some(schedules =>
     schedules.some(schedule =>
       schedule.routeId === route.routeId &&
-      (schedule.directions || []).some(direction =>
+      (!matchDirection || (schedule.directions || []).some(direction =>
         String(direction.directionId) === String(route.directionId)
-      )
+      ))
     )
   ));
 }
@@ -359,26 +377,19 @@ function RoutePicker({ label, stop, stopLabel, onStopChange, selectedRoutes, onR
 
 function SavedRouteForm({ onSave, onCancel, isClosing }) {
   const [name, setName] = useState('');
-  const [walkMinutes, setWalkMinutes] = useState('5');
-  const [startStop, setStartStop] = useState(null);
-  const [leg1Routes, setLeg1Routes] = useState([]);
-  const [transferStop, setTransferStop] = useState(null);
-  const [leg2StartStop, setLeg2StartStop] = useState(null);
-  const [leg2Routes, setLeg2Routes] = useState([]);
-  const [destinationStop, setDestinationStop] = useState(null);
+  const [legs, setLegs] = useState(() => [createEmptyLeg(0), createEmptyLeg(1)]);
+  const [walkMinutes, setWalkMinutes] = useState(['5']);
   const [formError, setFormError] = useState('');
   const [routeValidation, setRouteValidation] = useState(null);
-  const validationKey = JSON.stringify({
-    leg1: leg1Routes.length > 0 && transferStop
-      ? { routes: leg1Routes, stopIds: transferStop.stopIds }
-      : null,
-    leg2Start: leg2Routes.length > 0 && leg2StartStop
-      ? { routes: leg2Routes, stopIds: leg2StartStop.stopIds }
-      : null,
-    leg2Destination: leg2Routes.length > 0 && destinationStop
-      ? { routes: leg2Routes, stopIds: destinationStop.stopIds }
-      : null
-  });
+  const [newLegId, setNewLegId] = useState(null);
+  const [expandedLegId, setExpandedLegId] = useState(null);
+  const formRef = useRef(null);
+  const nextLegId = useRef(2);
+  const validationKey = JSON.stringify(legs.map(leg => ({
+    routes: leg.routes.map(({ routeId, directionId }) => ({ routeId, directionId })),
+    startStopIds: leg.startStop?.stopIds || null,
+    endStopIds: leg.endStop?.stopIds || null
+  })));
 
   useEffect(() => {
     const scrollY = window.scrollY;
@@ -408,27 +419,34 @@ function SavedRouteForm({ onSave, onCancel, isClosing }) {
   }, []);
 
   useEffect(() => {
-    const selections = JSON.parse(validationKey);
-    if (!selections.leg1 || !selections.leg2Start || !selections.leg2Destination ||
-        !API_KEY || API_KEY === 'A_TE_API_KULCSOD') {
+    if (expandedLegId === null || !formRef.current) return;
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    formRef.current.scrollTo({
+      top: formRef.current.scrollHeight,
+      behavior: prefersReducedMotion ? 'auto' : 'smooth'
+    });
+  }, [expandedLegId]);
+
+  useEffect(() => {
+    const completeLegs = JSON.parse(validationKey)
+      .map((leg, index) => ({ ...leg, index }))
+      .filter(leg => leg.routes.length > 0 && leg.startStopIds && leg.endStopIds);
+    if (completeLegs.length === 0 || !API_KEY || API_KEY === 'A_TE_API_KULCSOD') {
       return undefined;
     }
 
     const controller = new AbortController();
     const validateRoutes = async () => {
       try {
-        const [leg1ServesTransfer, leg2ServesStart, leg2ServesDestination] = await Promise.all([
-          routesServeStops(selections.leg1.stopIds, selections.leg1.routes, controller.signal),
-          routesServeStops(selections.leg2Start.stopIds, selections.leg2Start.routes, controller.signal),
-          routesServeStops(selections.leg2Destination.stopIds, selections.leg2Destination.routes, controller.signal)
-        ]);
+        const results = await Promise.all(completeLegs.map(async leg => {
+          const [servesStart, servesEnd] = await Promise.all([
+            routesServeStops(leg.startStopIds, leg.routes, controller.signal),
+            routesServeStops(leg.endStopIds, leg.routes, controller.signal, false)
+          ]);
+          return { index: leg.index, valid: servesStart && servesEnd };
+        }));
         if (!controller.signal.aborted) {
-          setRouteValidation({
-            key: validationKey,
-            leg1ServesTransfer,
-            leg2ServesStart,
-            leg2ServesDestination
-          });
+          setRouteValidation({ key: validationKey, results });
         }
       } catch (error) {
         if (error.name === 'AbortError') return;
@@ -442,72 +460,88 @@ function SavedRouteForm({ onSave, onCancel, isClosing }) {
   }, [validationKey]);
 
   const currentValidation = routeValidation?.key === validationKey ? routeValidation : null;
-  const hasRouteEndpoints = Boolean(
-    leg1Routes.length > 0 && transferStop && leg2Routes.length > 0 && leg2StartStop && destinationStop
-  );
-  const canSaveRoute = currentValidation?.leg1ServesTransfer &&
-    currentValidation?.leg2ServesStart && currentValidation?.leg2ServesDestination;
+  const isComplete = legs.every(leg => leg.startStop && leg.routes.length > 0 && leg.endStop);
+  const canSaveRoute = currentValidation?.results?.length === legs.length &&
+    currentValidation.results.every(result => result.valid);
+
+  const updateLeg = (index, updates) => {
+    setLegs(current => current.map((leg, legIndex) =>
+      legIndex === index ? { ...leg, ...updates } : leg
+    ));
+    setFormError('');
+  };
+
+  const selectEndStop = (index, stop) => {
+    setLegs(current => current.map((leg, legIndex) => {
+      if (legIndex === index) return { ...leg, endStop: stop };
+      if (legIndex === index + 1 &&
+          (!leg.startStop || leg.startStop.name === current[index].endStop?.name)) {
+        return { ...leg, startStop: stop, routes: [] };
+      }
+      return leg;
+    }));
+    setFormError('');
+  };
+
+  const addLeg = () => {
+    const id = nextLegId.current++;
+    setLegs(current => [
+      ...current,
+      { ...createEmptyLeg(id), startStop: current[current.length - 1].endStop }
+    ]);
+    setWalkMinutes(current => [...current, '5']);
+    setFormError('');
+    setNewLegId(id);
+    requestAnimationFrame(() => setExpandedLegId(id));
+  };
+
+  const removeLeg = index => {
+    if (index < 2) return;
+    setLegs(current => current.filter((_, legIndex) => legIndex !== index));
+    setWalkMinutes(current => current.filter((_, transferIndex) => transferIndex !== index - 1));
+  };
+
+  const updateWalkMinutes = (index, value) => {
+    setWalkMinutes(current => current.map((minutes, transferIndex) =>
+      transferIndex === index ? value : minutes
+    ));
+  };
 
   const handleSave = event => {
     event.preventDefault();
-    if (!name.trim() || !startStop || leg1Routes.length === 0 || !transferStop || leg2Routes.length === 0 || !destinationStop) {
-      setFormError('Töltsd ki az útvonal nevét, mindkét járatot és az átszálló-, valamint célmegállót.');
+    if (!name.trim() || !isComplete) {
+      setFormError('Adj nevet az útvonalnak, és töltsd ki az összes járat megállóit és járatait.');
       return;
     }
     if (!canSaveRoute) {
-      setFormError('Várd meg a megállók ellenőrzését, és válassz olyan járatirányt, amely kiszolgálja a megadott megállókat.');
+      setFormError('Várd meg a járatok ellenőrzését, és válassz olyan járatokat, amelyek a megadott megállókat érintik.');
       return;
     }
 
-    const firstLegRoute = leg1Routes[0];
-    const secondLegRoute = leg2Routes[0];
-    const serializeRoute = route => ({
-      routeId: route.routeId,
-      route: route.route,
-      directionId: route.directionId,
-      headsign: route.headsign,
-      type: route.type,
-      color: route.color,
-      textColor: route.textColor,
-      stopIds: route.stopIds
+    const serializeRoute = selectedRoute => ({
+      routeId: selectedRoute.routeId,
+      route: selectedRoute.route,
+      directionId: selectedRoute.directionId,
+      headsign: selectedRoute.headsign,
+      type: selectedRoute.type,
+      color: selectedRoute.color,
+      textColor: selectedRoute.textColor,
+      stopIds: selectedRoute.stopIds
     });
 
     onSave({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: name.trim(),
-      transferWalkMinutes: Number(walkMinutes) || 0,
-      leg1: {
-        startStopId: firstLegRoute.stopIds[0],
-        startStopIds: [...new Set(leg1Routes.flatMap(route => route.stopIds))],
-        startStopName: startStop.name,
-        routeId: firstLegRoute.routeId,
-        route: firstLegRoute.route,
-        directionId: firstLegRoute.directionId,
-        headsign: firstLegRoute.headsign,
-        type: firstLegRoute.type,
-        color: firstLegRoute.color,
-        textColor: firstLegRoute.textColor,
-        routes: leg1Routes.map(serializeRoute),
-        transferStopId: transferStop.stopId,
-        transferStopIds: transferStop.stopIds,
-        transferStopName: transferStop.name
-      },
-      leg2: {
-        startStopId: secondLegRoute.stopIds[0],
-        startStopIds: [...new Set(leg2Routes.flatMap(route => route.stopIds))],
-        startStopName: leg2StartStop.name,
-        routeId: secondLegRoute.routeId,
-        route: secondLegRoute.route,
-        directionId: secondLegRoute.directionId,
-        headsign: secondLegRoute.headsign,
-        type: secondLegRoute.type,
-        color: secondLegRoute.color,
-        textColor: secondLegRoute.textColor,
-        routes: leg2Routes.map(serializeRoute),
-        destinationStopId: destinationStop.stopId,
-        destinationStopIds: destinationStop.stopIds,
-        destinationStopName: destinationStop.name
-      }
+      legs: legs.map(leg => ({
+        startStopId: leg.routes[0].stopIds[0],
+        startStopIds: [...new Set(leg.routes.flatMap(selectedRoute => selectedRoute.stopIds))],
+        startStopName: leg.startStop.name,
+        routes: leg.routes.map(serializeRoute),
+        endStopId: leg.endStop.stopId,
+        endStopIds: leg.endStop.stopIds,
+        endStopName: leg.endStop.name
+      })),
+      transfers: walkMinutes.map(minutes => ({ walkMinutes: Number(minutes) || 0 }))
     });
   };
 
@@ -525,6 +559,7 @@ function SavedRouteForm({ onSave, onCancel, isClosing }) {
         className={`saved-route-dialog max-h-[92dvh] w-full max-w-lg overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-800 shadow-2xl${isClosing ? ' is-closing' : ''}`}
       >
         <form
+        ref={formRef}
         onSubmit={handleSave}
         className="saved-route-form max-h-[92dvh] w-full touch-pan-y overscroll-contain overflow-y-auto p-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
         >
@@ -555,121 +590,114 @@ function SavedRouteForm({ onSave, onCancel, isClosing }) {
             />
           </div>
 
-          <section className="route-form-section space-y-3 rounded-xl border border-zinc-700 bg-zinc-900/40 p-3">
-            <h4 className="font-semibold">1. járat</h4>
-            <RoutePicker
-              label="Járat és irány"
-              stop={startStop}
-              stopLabel="Kiinduló megálló"
-              onStopChange={setStartStop}
-              selectedRoutes={leg1Routes}
-              onRouteChange={setLeg1Routes}
-            />
-            <RouteStopPicker
-              label="Átszállómegálló"
-              selectedStop={transferStop}
-              onSelect={value => {
-                setTransferStop(value);
-                setLeg2StartStop(value);
-                setLeg2Routes([]);
-              }}
-              onClear={() => {
-                setTransferStop(null);
-                setLeg2StartStop(null);
-                setLeg2Routes([]);
-              }}
-            />
-          </section>
+          {legs.map((leg, index) => (
+            <div
+              key={leg.id}
+              className={leg.id === newLegId ? `route-leg-expansion${leg.id === expandedLegId ? ' is-open' : ''}` : ''}
+            >
+              <div className={leg.id === newLegId ? 'route-leg-expansion-content' : ''}>
+              {index > 0 && (
+                <section className="route-form-section mb-4 rounded-xl border border-zinc-700 bg-zinc-900/40 p-3">
+                  <div className="mb-2 flex min-w-0 items-center gap-2 text-sm text-zinc-300">
+                    <ArrowDown className="h-4 w-4 flex-shrink-0 text-violet-300" />
+                    <span className="min-w-0 truncate">
+                      Átszállás: {legs[index - 1].endStop?.name || 'előző megálló'} → {leg.startStop?.name || 'felszállóhely'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label htmlFor={`transfer-walk-${leg.id}`} className="min-w-0 flex-1 text-sm text-zinc-400">
+                      Séta (perc)
+                    </label>
+                    <input
+                      id={`transfer-walk-${leg.id}`}
+                      type="number"
+                      min="0"
+                      max="180"
+                      step="1"
+                      value={walkMinutes[index - 1] ?? ''}
+                      onChange={event => {
+                        const value = event.target.value;
+                        updateWalkMinutes(index - 1, value === '' ? '' : String(
+                          Math.max(0, Math.min(180, Math.round(Number(value))))
+                        ));
+                      }}
+                      className="route-form-field w-20 rounded-lg border border-zinc-600 bg-zinc-700 px-2 py-2 text-center text-white outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                  </div>
+                </section>
+              )}
 
-          <div className="route-form-section flex items-center gap-3 rounded-xl border border-zinc-700 bg-zinc-900/40 p-3">
-            <ArrowDown className="h-5 w-5 flex-shrink-0 text-violet-300" />
-            <label htmlFor="transfer-walk-minutes" className="min-w-0 flex-1 text-sm text-zinc-300">
-              Séta az átszálláshoz (perc)
-            </label>
-            <input
-              id="transfer-walk-minutes"
-              type="number"
-              min="0"
-              max="180"
-              step="1"
-              value={walkMinutes}
-              onChange={event => {
-                const value = event.target.value;
-                setWalkMinutes(value === '' ? '' : String(
-                  Math.max(0, Math.min(180, Math.round(Number(value))))
-                ));
-              }}
-              className="route-form-field w-20 rounded-lg border border-zinc-600 bg-zinc-700 px-2 py-2 text-center text-white outline-none focus:ring-2 focus:ring-violet-400"
-            />
-          </div>
-
-          <section className="route-form-section space-y-3 rounded-xl border border-zinc-700 bg-zinc-900/40 p-3">
-            <h4 className="font-semibold">2. járat</h4>
-            <RoutePicker
-              label="Járat és irány"
-              stop={leg2StartStop}
-              stopLabel="Második járat felszállóhelye"
-              onStopChange={value => {
-                setLeg2StartStop(value);
-                setLeg2Routes([]);
-              }}
-              selectedRoutes={leg2Routes}
-              onRouteChange={setLeg2Routes}
-            />
-            <RouteStopPicker
-              label="Végállomás"
-              selectedStop={destinationStop}
-              onSelect={setDestinationStop}
-              onClear={() => setDestinationStop(null)}
-            />
-            {hasRouteEndpoints && (
-              <p className={`text-sm ${
-                currentValidation?.error || (
-                  currentValidation && (
-                    !currentValidation.leg1ServesTransfer ||
-                    !currentValidation.leg2ServesStart ||
-                    !currentValidation.leg2ServesDestination
-                  )
-                ) ? 'text-red-400' : 'text-zinc-400'
-              }`} role={currentValidation?.error || (
-                currentValidation && (
-                  !currentValidation.leg1ServesTransfer ||
-                  !currentValidation.leg2ServesStart ||
-                  !currentValidation.leg2ServesDestination
-                )
-              ) ? 'alert' : 'status'}>
-                {!currentValidation
-                  ? 'Járatok ellenőrzése a kiválasztott megállóknál...'
-                  : currentValidation.error
-                    ? 'Nem sikerült ellenőrizni a megállókat. Ellenőrizd az internetkapcsolatot, majd válaszd ki újra a megállókat.'
-                    : !currentValidation.leg1ServesTransfer
-                      ? 'Az első járat kiválasztott iránya nem érinti az átszállómegállót.'
-                      : !currentValidation.leg2ServesStart
-                        ? 'A második járat kiválasztott iránya nem érinti a felszállóhelyet.'
-                        : !currentValidation.leg2ServesDestination
-                          ? 'A második járat kiválasztott iránya nem érinti a célmegállót.'
-                          : 'A kiválasztott járatok érintik a megadott megállókat.'}
-              </p>
-            )}
-          </section>
+              <section className="route-form-section space-y-3 rounded-xl border border-zinc-700 bg-zinc-900/40 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-semibold">{index + 1}. járat</h4>
+                  {index > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeLeg(index)}
+                      aria-label={`${index + 1}. járat eltávolítása`}
+                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-red-400 transition-colors hover:bg-zinc-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <RoutePicker
+                  label="Járat és irány"
+                  stop={leg.startStop}
+                  stopLabel={index === 0 ? 'Kiinduló megálló' : 'Felszállóhely'}
+                  onStopChange={stop => updateLeg(index, { startStop: stop, routes: [] })}
+                  selectedRoutes={leg.routes}
+                  onRouteChange={routes => updateLeg(index, {
+                    routes: typeof routes === 'function' ? routes(leg.routes) : routes
+                  })}
+                />
+                <RouteStopPicker
+                  label="Leszállóhely"
+                  selectedStop={leg.endStop}
+                  onSelect={stop => selectEndStop(index, stop)}
+                  onClear={() => selectEndStop(index, null)}
+                />
+                {currentValidation?.results?.some(result => result.index === index && !result.valid) && (
+                  <p className="text-sm text-red-400" role="alert">
+                    A kiválasztott járatok nem érintik a felszálló- és leszállóhelyet.
+                  </p>
+                )}
+                {currentValidation?.error && (
+                  <p className="text-sm text-red-400" role="alert">
+                    Nem sikerült ellenőrizni a járatot. Próbáld újra később.
+                  </p>
+                )}
+              </section>
+              </div>
+            </div>
+          ))}
         </div>
 
         {formError && <p className="mt-3 text-sm text-red-400" role="alert">{formError}</p>}
-        <div className="mt-5 flex gap-3">
+        <div className="mt-4 grid gap-3">
           <button
             type="button"
-            onClick={onCancel}
-            className="min-h-11 flex-1 rounded-lg bg-zinc-700 px-4 py-2 font-semibold transition-colors hover:bg-zinc-600"
+            onClick={addLeg}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-purple-300/50 bg-purple-600/15 px-4 py-2 font-semibold text-purple-200 transition-colors hover:bg-purple-600/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
           >
-            Mégse
+            <Plus className="h-4 w-4" /> Új járat hozzáadása
           </button>
-          <button
-            type="submit"
-            disabled={hasRouteEndpoints && !canSaveRoute}
-            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" /> Mentés
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="min-h-11 flex-1 rounded-lg bg-zinc-700 px-4 py-2 font-semibold transition-colors hover:bg-zinc-600"
+            >
+              Mégse
+            </button>
+            <button
+              type="submit"
+              disabled={isComplete && !canSaveRoute}
+              className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" /> Mentés
+            </button>
+          </div>
         </div>
         </form>
       </div>
@@ -695,6 +723,7 @@ function getStopTimes(data, route) {
     })
     .map(stopTime => ({
       tripId: stopTime.tripId,
+      serviceDate: stopTime.serviceDate,
       time: stopTime.predictedDepartureTime ||
         stopTime.predictedArrivalTime ||
         stopTime.departureTime ||
@@ -718,75 +747,165 @@ function getSelectedRoutes(leg) {
   }];
 }
 
-function calculateJourney(route, stopDataById) {
-  const firstLegRoutes = getSelectedRoutes(route.leg1);
-  const secondLegRoutes = getSelectedRoutes(route.leg2);
-  const transferIds = [...new Set(route.leg1.transferStopIds || [route.leg1.transferStopId])];
-  const startIds = [...new Set(firstLegRoutes.flatMap(vehicle =>
-    vehicle.stopIds || route.leg1.startStopIds || [route.leg1.startStopId]
-  ))];
-  if (startIds.some(id => !stopDataById.has(id)) ||
-      transferIds.some(id => !stopDataById.has(id))) {
+function getRouteLegs(route) {
+  if (Array.isArray(route.legs) && route.legs.length > 0) return route.legs;
+  return [
+    {
+      startStopId: route.leg1.startStopId,
+      startStopIds: route.leg1.startStopIds,
+      startStopName: route.leg1.startStopName,
+      routes: getSelectedRoutes(route.leg1),
+      endStopId: route.leg1.transferStopId,
+      endStopIds: route.leg1.transferStopIds || [route.leg1.transferStopId],
+      endStopName: route.leg1.transferStopName
+    },
+    {
+      startStopId: route.leg2.startStopId,
+      startStopIds: route.leg2.startStopIds,
+      startStopName: route.leg2.startStopName,
+      routes: getSelectedRoutes(route.leg2),
+      endStopId: route.leg2.destinationStopId,
+      endStopIds: route.leg2.destinationStopIds || [route.leg2.destinationStopId],
+      endStopName: route.leg2.destinationStopName
+    }
+  ];
+}
+
+function getRouteTransfers(route, legs) {
+  if (Array.isArray(route.transfers)) return route.transfers;
+  return [{
+    walkMinutes: route.transferWalkMinutes || 0
+  }].slice(0, Math.max(0, legs.length - 1));
+}
+
+function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
+  const legs = getRouteLegs(route);
+  const transfers = getRouteTransfers(route, legs);
+  const requiredIds = [...new Set(legs.flatMap(leg => [
+    ...(leg.startStopIds || [leg.startStopId]),
+    ...(leg.endStopIds || [leg.endStopId]),
+    ...getSelectedRoutes(leg).flatMap(vehicle => vehicle.stopIds || [])
+  ]).filter(Boolean))];
+  if (requiredIds.some(id => !stopDataById.has(id))) {
     return { status: 'error' };
   }
 
-  const firstLegDepartures = firstLegRoutes.flatMap(vehicle =>
-    (vehicle.stopIds || route.leg1.startStopIds || [route.leg1.startStopId])
+  const departuresByLeg = legs.map(leg => getSelectedRoutes(leg).flatMap(vehicle =>
+    (vehicle.stopIds || leg.startStopIds || [leg.startStopId])
       .flatMap(stopId => getStopTimes(stopDataById.get(stopId), vehicle)
-        .map(departure => ({ ...departure, vehicle })))
-  ).sort((a, b) => a.time - b.time);
-  const arrivalsByTrip = new Map();
-  transferIds.forEach(stopId => {
-    const transferData = stopDataById.get(stopId);
-    firstLegRoutes.forEach(vehicle => {
-      getStopTimes(transferData, vehicle).forEach(stopTime => {
-        const time = (transferData.entry?.stopTimes || []).find(item => item.tripId === stopTime.tripId);
-        const arrival = time?.predictedArrivalTime || time?.arrivalTime ||
-          time?.predictedDepartureTime || time?.departureTime;
-        if (Number.isFinite(arrival)) arrivalsByTrip.set(stopTime.tripId, arrival);
-      });
+        .map(departure => ({ ...departure, vehicle, stopId })))
+  ).sort((a, b) => a.time - b.time));
+  const arrivalByTrip = new Map();
+  const tripDetailsNeeded = new Map();
+  const getArrival = (leg, departure, legIndex) => {
+    const tripKey = `${departure.tripId}:${departure.serviceDate || ''}`;
+    const cacheKey = `${legIndex}:${tripKey}`;
+    if (arrivalByTrip.has(cacheKey)) return arrivalByTrip.get(cacheKey);
+    for (const stopId of leg.endStopIds || [leg.endStopId]) {
+      const data = stopDataById.get(stopId);
+      const matched = (data?.entry?.stopTimes || []).find(stopTime =>
+        stopTime.tripId === departure.tripId &&
+        (leg.endStopIds || [leg.endStopId]).includes(stopTime.stopId)
+      );
+      if (!matched) continue;
+      const arrival = matched.predictedArrivalTime || matched.arrivalTime ||
+        matched.predictedDepartureTime || matched.departureTime;
+      if (Number.isFinite(arrival)) {
+        arrivalByTrip.set(cacheKey, arrival);
+        return arrival;
+      }
+    }
+    const tripDetails = tripDetailsById.get(tripKey);
+    if (tripDetails) {
+      const matched = (tripDetails.entry?.stopTimes || []).find(stopTime =>
+        (leg.endStopIds || [leg.endStopId]).includes(stopTime.stopId)
+      );
+      const arrival = matched?.predictedArrivalTime || matched?.arrivalTime ||
+        matched?.predictedDepartureTime || matched?.departureTime;
+      if (Number.isFinite(arrival)) {
+        arrivalByTrip.set(cacheKey, arrival);
+        return arrival;
+      }
+    }
+
+    tripDetailsNeeded.set(tripKey, {
+      tripId: departure.tripId,
+      serviceDate: departure.serviceDate
     });
-  });
-
-  const secondLegDepartures = secondLegRoutes.flatMap(vehicle =>
-    (vehicle.stopIds || route.leg2.startStopIds || [route.leg2.startStopId])
-      .flatMap(stopId => getStopTimes(stopDataById.get(stopId), vehicle)
-        .map(departure => ({ ...departure, vehicle })))
-  ).sort((a, b) => a.time - b.time);
+    arrivalByTrip.set(cacheKey, null);
+    return null;
+  };
   const now = Math.floor(Date.now() / 1000);
+  const failedJourneyStates = new Set();
 
-  for (const departure of firstLegDepartures) {
+  const continueJourney = (legIndex, departure, rides, transferDetails) => {
+    const stateKey = `${legIndex}:${departure.vehicle.routeId}:${departure.tripId}`;
+    if (failedJourneyStates.has(stateKey)) return null;
+    const leg = legs[legIndex];
+    const arrival = getArrival(leg, departure, legIndex);
+    if (!arrival || arrival < departure.time) {
+      failedJourneyStates.add(stateKey);
+      return null;
+    }
+    const nextRides = [...rides, {
+      departure: departure.time,
+      arrival,
+      vehicle: departure.vehicle
+    }];
+    if (legIndex === legs.length - 1) {
+      return { status: 'ready', rides: nextRides, transfers: transferDetails };
+    }
+
+    const walkMinutes = Number(transfers[legIndex]?.walkMinutes) || 0;
+    const earliestDeparture = arrival + walkMinutes * 60;
+    const nextDepartures = departuresByLeg[legIndex + 1]
+      .filter(candidate => candidate.time >= earliestDeparture);
+    for (const nextDeparture of nextDepartures) {
+      const result = continueJourney(
+        legIndex + 1,
+        nextDeparture,
+        nextRides,
+        [...transferDetails, {
+          arrival,
+          departure: nextDeparture.time,
+          walkMinutes,
+          waitMinutes: Math.max(0, Math.round((nextDeparture.time - earliestDeparture) / 60))
+        }]
+      );
+      if (result) return result;
+    }
+    failedJourneyStates.add(stateKey);
+    return null;
+  };
+
+  for (const departure of departuresByLeg[0]) {
     if (departure.time < now - 60) continue;
-    const arrival = arrivalsByTrip.get(departure.tripId);
-    if (!arrival || arrival < departure.time) continue;
-    const earliestTransferTime = arrival + route.transferWalkMinutes * 60;
-    const nextDeparture = secondLegDepartures.find(candidate => candidate.time >= earliestTransferTime);
-    if (!nextDeparture) continue;
-    return {
-      status: 'ready',
-      firstDeparture: departure.time,
-      transferArrival: arrival,
-      secondDeparture: nextDeparture.time,
-      firstVehicle: departure.vehicle,
-      secondVehicle: nextDeparture.vehicle,
-      waitMinutes: Math.max(0, Math.round((nextDeparture.time - earliestTransferTime) / 60))
-    };
+    const result = continueJourney(0, departure, [], []);
+    if (result) return result;
   }
-
-  return { status: 'empty' };
+  return tripDetailsNeeded.size > 0
+    ? { status: 'needs-trip-details', trips: [...tripDetailsNeeded.values()] }
+    : { status: 'empty' };
 }
 
 export default function SavedRoutes() {
   const [routes, setRoutes] = useState(readSavedRoutes);
   const routesRef = useRef(routes);
   const [journeys, setJourneys] = useState({});
+  const [expandedRouteIds, setExpandedRouteIds] = useState(() => new Set());
   const [removingRouteIds, setRemovingRouteIds] = useState(() => new Set());
+  const [routeDrag, setRouteDrag] = useState(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isFormClosing, setIsFormClosing] = useState(false);
   const [storageError, setStorageError] = useState('');
   const [portalTarget, setPortalTarget] = useState(null);
   const formCloseTimeoutRef = useRef(null);
   const routesListRef = useRef(null);
+  const routeTouchPressRef = useRef(null);
+  const routeTouchDragRef = useRef(null);
+  const routePointerSessionRef = useRef(null);
+  const routeClickSuppressionRef = useRef(false);
+  const routeClickSuppressionTimeoutRef = useRef(null);
   const routeRemovalCleanupRef = useRef(new Map());
   const setSectionRef = useCallback(node => {
     if (node) setPortalTarget(node.closest('.app-shell'));
@@ -794,7 +913,21 @@ export default function SavedRoutes() {
 
   useEffect(() => () => {
     window.clearTimeout(formCloseTimeoutRef.current);
+    window.clearTimeout(routeClickSuppressionTimeoutRef.current);
     routeRemovalCleanupRef.current.forEach(cleanup => cleanup());
+    const press = routeTouchPressRef.current;
+    if (press) {
+      window.clearTimeout(press.timeoutId);
+      document.removeEventListener('touchmove', press.handleMove);
+      document.removeEventListener('touchend', press.handleEnd);
+      document.removeEventListener('touchcancel', press.handleCancel);
+    }
+    const pointerSession = routePointerSessionRef.current;
+    if (pointerSession) {
+      document.removeEventListener('pointermove', pointerSession.handleMove);
+      document.removeEventListener('pointerup', pointerSession.handleEnd);
+      document.removeEventListener('pointercancel', pointerSession.handleCancel);
+    }
   }, []);
 
   const openForm = () => {
@@ -825,6 +958,241 @@ export default function SavedRoutes() {
       setStorageError('Nem sikerült elmenteni az útvonalakat a böngésző tárába.');
       return false;
     }
+  };
+
+  const createRouteDrag = (route, index, currentTarget, x, y) => {
+    const card = currentTarget.getBoundingClientRect();
+    const list = routesListRef.current;
+    if (!list) return null;
+    const listBounds = list.getBoundingClientRect();
+    const otherCenters = Array.from(list.querySelectorAll('[data-saved-route-slot]'))
+      .filter(slot => slot.dataset.routeId !== String(route.id))
+      .map(slot => {
+        const bounds = slot.getBoundingClientRect();
+        return bounds.top + bounds.height / 2;
+      });
+
+    return {
+      id: route.id,
+      x,
+      y,
+      startX: x,
+      startY: y,
+      didMove: false,
+      containerLeft: listBounds.left,
+      containerTop: listBounds.top,
+      positionX: x - listBounds.left,
+      positionY: y - listBounds.top,
+      offsetX: x - card.left,
+      offsetY: y - card.top,
+      width: card.width,
+      height: card.height,
+      originalIndex: index,
+      targetIndex: index,
+      otherCenters,
+      step: card.height + (parseFloat(getComputedStyle(list).rowGap) || 12)
+    };
+  };
+
+  const reorderRoute = drag => {
+    const currentRoutes = routesRef.current;
+    const fromIndex = currentRoutes.findIndex(route => route.id === drag.id);
+    if (fromIndex < 0 || fromIndex === drag.targetIndex) return;
+
+    const reordered = [...currentRoutes];
+    const [movingRoute] = reordered.splice(fromIndex, 1);
+    reordered.splice(drag.targetIndex, 0, movingRoute);
+    persistRoutes(reordered);
+  };
+
+  const handleRoutePointerDown = (event, route, index) => {
+    if (event.pointerType === 'touch' || event.button !== 0) return;
+    const button = event.target.closest('button');
+    if (button && !button.hasAttribute('aria-controls')) return;
+    if (routePointerSessionRef.current) return;
+
+    const session = {
+      pointerId: event.pointerId,
+      route,
+      index,
+      currentTarget: event.currentTarget,
+      startX: event.clientX,
+      startY: event.clientY,
+      startedOnToggle: Boolean(button),
+      drag: null,
+      handleMove: null,
+      handleEnd: null,
+      handleCancel: null
+    };
+    session.handleMove = moveEvent => {
+      if (moveEvent.pointerId !== session.pointerId) return;
+      if (!session.drag) {
+        if (Math.hypot(
+          moveEvent.clientX - session.startX,
+          moveEvent.clientY - session.startY
+        ) <= 8) return;
+
+        const drag = createRouteDrag(
+          session.route,
+          session.index,
+          session.currentTarget,
+          session.startX,
+          session.startY
+        );
+        if (!drag) return;
+        session.drag = { ...drag, pointerId: session.pointerId, startedOnToggle: session.startedOnToggle };
+      }
+
+      moveEvent.preventDefault();
+      const targetIndex = session.drag.otherCenters
+        .filter(center => moveEvent.clientY > center).length;
+      session.drag = {
+        ...session.drag,
+        x: moveEvent.clientX,
+        y: moveEvent.clientY,
+        positionX: moveEvent.clientX - session.drag.containerLeft,
+        positionY: moveEvent.clientY - session.drag.containerTop,
+        targetIndex,
+        didMove: true
+      };
+      setRouteDrag(session.drag);
+    };
+    session.handleEnd = endEvent => {
+      if (endEvent.pointerId !== session.pointerId) return;
+      routePointerSessionRef.current = null;
+      document.removeEventListener('pointermove', session.handleMove);
+      document.removeEventListener('pointerup', session.handleEnd);
+      document.removeEventListener('pointercancel', session.handleCancel);
+      suppressRouteToggleAfterDrag(session.drag);
+      if (session.drag) reorderRoute(session.drag);
+      setRouteDrag(null);
+    };
+    session.handleCancel = cancelEvent => {
+      if (cancelEvent.pointerId !== session.pointerId) return;
+      routePointerSessionRef.current = null;
+      document.removeEventListener('pointermove', session.handleMove);
+      document.removeEventListener('pointerup', session.handleEnd);
+      document.removeEventListener('pointercancel', session.handleCancel);
+      setRouteDrag(null);
+    };
+    routePointerSessionRef.current = session;
+    document.addEventListener('pointermove', session.handleMove);
+    document.addEventListener('pointerup', session.handleEnd);
+    document.addEventListener('pointercancel', session.handleCancel);
+  };
+
+  const suppressRouteToggleAfterDrag = drag => {
+    if (!drag?.didMove || !drag.startedOnToggle) return;
+
+    routeClickSuppressionRef.current = true;
+    window.clearTimeout(routeClickSuppressionTimeoutRef.current);
+    routeClickSuppressionTimeoutRef.current = window.setTimeout(() => {
+      routeClickSuppressionRef.current = false;
+    }, 0);
+  };
+
+  const handleRouteClickCapture = event => {
+    if (!routeClickSuppressionRef.current || !event.target.closest('button[aria-controls]')) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    routeClickSuppressionRef.current = false;
+    window.clearTimeout(routeClickSuppressionTimeoutRef.current);
+  };
+
+  const cancelRouteTouchPress = () => {
+    const press = routeTouchPressRef.current;
+    if (!press) return;
+
+    window.clearTimeout(press.timeoutId);
+    document.removeEventListener('touchmove', press.handleMove);
+    document.removeEventListener('touchend', press.handleEnd);
+    document.removeEventListener('touchcancel', press.handleCancel);
+    routeTouchPressRef.current = null;
+    routeTouchDragRef.current = null;
+  };
+
+  const finishRouteTouch = (event, shouldReorder) => {
+    const press = routeTouchPressRef.current;
+    const touch = Array.from(event.changedTouches)
+      .find(item => item.identifier === press?.touchId);
+    if (!press || !touch) return;
+
+    const drag = routeTouchDragRef.current;
+    suppressRouteToggleAfterDrag(drag);
+    cancelRouteTouchPress();
+    if (shouldReorder && drag) reorderRoute(drag);
+    setRouteDrag(null);
+  };
+
+  const handleRouteTouchStart = (event, route, index) => {
+    const button = event.target.closest('button');
+    if ((button && !button.hasAttribute('aria-controls')) || event.touches.length !== 1) return;
+
+    cancelRouteTouchPress();
+    const touch = event.touches[0];
+    const currentTarget = event.currentTarget;
+    const handleEnd = endEvent => finishRouteTouch(endEvent, true);
+    const handleCancel = cancelEvent => finishRouteTouch(cancelEvent, false);
+    const handleMove = moveEvent => {
+      const activeTouch = Array.from(moveEvent.touches)
+        .find(item => item.identifier === touch.identifier);
+      if (!activeTouch) return;
+
+      const drag = routeTouchDragRef.current;
+      if (!drag) {
+        if (Math.hypot(activeTouch.clientX - touch.clientX, activeTouch.clientY - touch.clientY) > 8) {
+          cancelRouteTouchPress();
+        }
+        return;
+      }
+
+      moveEvent.preventDefault();
+      const targetIndex = drag.otherCenters.filter(center => activeTouch.clientY > center).length;
+      const updatedDrag = {
+        ...drag,
+        x: activeTouch.clientX,
+        y: activeTouch.clientY,
+        positionX: activeTouch.clientX - drag.containerLeft,
+        positionY: activeTouch.clientY - drag.containerTop,
+        targetIndex,
+        didMove: drag.didMove ||
+          Math.hypot(activeTouch.clientX - drag.startX, activeTouch.clientY - drag.startY) > 8
+      };
+      routeTouchDragRef.current = updatedDrag;
+      setRouteDrag(current => current && ({
+        ...current,
+        ...updatedDrag
+      }));
+    };
+    const timeoutId = window.setTimeout(() => {
+      const drag = createRouteDrag(
+        route,
+        index,
+        currentTarget,
+        touch.clientX,
+        touch.clientY
+      );
+      if (!drag) {
+        cancelRouteTouchPress();
+        return;
+      }
+
+      const activeDrag = { ...drag, startedOnToggle: Boolean(button) };
+      routeTouchDragRef.current = activeDrag;
+      setRouteDrag(activeDrag);
+    }, 1000);
+
+    routeTouchPressRef.current = {
+      touchId: touch.identifier,
+      timeoutId,
+      handleMove,
+      handleEnd,
+      handleCancel
+    };
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
+    document.addEventListener('touchcancel', handleCancel);
   };
 
   const finishRemovingRoute = routeId => {
@@ -877,6 +1245,7 @@ export default function SavedRoutes() {
       window.clearTimeout(fallbackTimeout);
       slot.removeEventListener('transitionend', handleTransitionEnd);
     };
+
     const finish = () => {
       if (finished) return;
       finished = true;
@@ -906,6 +1275,15 @@ export default function SavedRoutes() {
     });
   };
 
+  const toggleRoute = routeId => {
+    setExpandedRouteIds(current => {
+      const next = new Set(current);
+      if (next.has(routeId)) next.delete(routeId);
+      else next.add(routeId);
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (routes.length === 0 || !API_KEY || API_KEY === 'A_TE_API_KULCSOD') return undefined;
 
@@ -915,15 +1293,13 @@ export default function SavedRoutes() {
     const refresh = async () => {
       if (isFetching || controller.signal.aborted) return;
       isFetching = true;
-      const stopIds = [...new Set(routes.flatMap(route => [
-        ...getSelectedRoutes(route.leg1).flatMap(vehicle =>
-          vehicle.stopIds || route.leg1.startStopIds || [route.leg1.startStopId]
-        ),
-        ...(route.leg1.transferStopIds || [route.leg1.transferStopId]),
-        ...getSelectedRoutes(route.leg2).flatMap(vehicle =>
-          vehicle.stopIds || route.leg2.startStopIds || [route.leg2.startStopId]
-        )
-      ]))];
+      const stopIds = [...new Set(routes.flatMap(route =>
+        getRouteLegs(route).flatMap(leg => [
+          ...(leg.startStopIds || [leg.startStopId]),
+          ...(leg.endStopIds || [leg.endStopId]),
+          ...getSelectedRoutes(leg).flatMap(vehicle => vehicle.stopIds || [])
+        ])
+      ).filter(Boolean))];
       const pendingStopIds = [...stopIds];
       const stopDataById = new Map();
       const failedStopIds = new Set();
@@ -942,22 +1318,70 @@ export default function SavedRoutes() {
       await Promise.all(workers);
       if (!active || controller.signal.aborted) return;
 
-      const nextJourneys = {};
+      const invalidRouteIds = new Set();
       routes.forEach(route => {
-        const requiredIds = [
-          ...getSelectedRoutes(route.leg1).flatMap(vehicle =>
-            vehicle.stopIds || route.leg1.startStopIds || [route.leg1.startStopId]
-          ),
-          ...(route.leg1.transferStopIds || [route.leg1.transferStopId]),
-          ...getSelectedRoutes(route.leg2).flatMap(vehicle =>
-            vehicle.stopIds || route.leg2.startStopIds || [route.leg2.startStopId]
-          )
-        ];
-        if (requiredIds.some(id => failedStopIds.has(id))) {
-          nextJourneys[route.id] = { status: 'error' };
-        } else {
-          nextJourneys[route.id] = calculateJourney(route, stopDataById);
-        }
+        const requiredIds = getRouteLegs(route).flatMap(leg => [
+          ...(leg.startStopIds || [leg.startStopId]),
+          ...(leg.endStopIds || [leg.endStopId]),
+          ...getSelectedRoutes(leg).flatMap(vehicle => vehicle.stopIds || [])
+        ]).filter(Boolean);
+        if (requiredIds.some(id => failedStopIds.has(id))) invalidRouteIds.add(route.id);
+      });
+
+      const tripDetailsById = new Map();
+      const attemptedTripKeys = new Set();
+      const failedTripKeys = new Set();
+      let calculatedJourneys = new Map();
+      while (!controller.signal.aborted) {
+        const pendingTripsByKey = new Map();
+        calculatedJourneys = new Map(routes.map(route => [
+          route.id,
+          invalidRouteIds.has(route.id)
+            ? { status: 'error' }
+            : calculateJourney(route, stopDataById, tripDetailsById)
+        ]));
+
+        calculatedJourneys.forEach(journey => {
+          if (journey.status !== 'needs-trip-details') return;
+          journey.trips.forEach(trip => {
+            const key = `${trip.tripId}:${trip.serviceDate || ''}`;
+            if (!attemptedTripKeys.has(key)) pendingTripsByKey.set(key, trip);
+          });
+        });
+
+        const pendingTrips = [...pendingTripsByKey.entries()];
+        if (pendingTrips.length === 0) break;
+        pendingTrips.forEach(([tripKey]) => attemptedTripKeys.add(tripKey));
+
+        const tripWorkers = Array.from({
+          length: Math.min(4, pendingTrips.length)
+        }, async () => {
+          while (pendingTrips.length > 0 && !controller.signal.aborted) {
+            const [tripKey, trip] = pendingTrips.shift();
+            try {
+              tripDetailsById.set(
+                tripKey,
+                await fetchTripDetails(trip.tripId, trip.serviceDate, controller.signal)
+              );
+            } catch (error) {
+              if (error.name === 'AbortError') return;
+              failedTripKeys.add(tripKey);
+              console.error('Mentett útvonal járatadatainak lekérése nem sikerült:', trip.tripId, error);
+            }
+          }
+        });
+        await Promise.all(tripWorkers);
+      }
+      if (!active || controller.signal.aborted) return;
+
+      const nextJourneys = {};
+      calculatedJourneys.forEach((journey, routeId) => {
+        nextJourneys[routeId] = journey.status === 'needs-trip-details' &&
+          journey.trips.some(trip => failedTripKeys.has(`${trip.tripId}:${trip.serviceDate || ''}`))
+          ? { status: 'error' }
+          : journey.status === 'needs-trip-details'
+            ? { status: 'empty' }
+            : journey;
       });
       setJourneys(nextJourneys);
       isFetching = false;
@@ -997,24 +1421,87 @@ export default function SavedRoutes() {
           Mentsd el a napi útvonalaidat a megállók és járatok összekapcsolásával.
         </div>
       ) : (
-        <div ref={routesListRef} className="saved-route-list flex flex-col">
-          {routes.map(route => {
+        <>
+        {routes.length > 1 && (
+          <p className="-mt-2 mb-3 text-xs text-zinc-500">
+            Sorrend átrendezése: számítógépen húzd a kártyát a helyére. Mobilon tartsd lenyomva 1 másodpercig, majd húzd a helyére.
+          </p>
+        )}
+        <div ref={routesListRef} className="saved-route-list relative flex flex-col">
+          {routes.map((route, index) => {
             const journey = journeys[route.id];
+            const routeLegs = getRouteLegs(route);
+            const routeTransfers = getRouteTransfers(route, routeLegs);
+            const isExpanded = expandedRouteIds.has(route.id);
+            const isDragging = routeDrag?.id === route.id;
+            const movesDown = routeDrag &&
+              routeDrag.targetIndex < routeDrag.originalIndex &&
+              index >= routeDrag.targetIndex &&
+              index < routeDrag.originalIndex;
+            const movesUp = routeDrag &&
+              routeDrag.targetIndex > routeDrag.originalIndex &&
+              index > routeDrag.originalIndex &&
+              index <= routeDrag.targetIndex;
+            const shift = !isDragging && movesDown
+              ? routeDrag.step
+              : !isDragging && movesUp ? -routeDrag.step : 0;
+            const detailsId = `saved-route-details-${route.id}`;
             return (
               <div
                 key={route.id}
                 data-saved-route-slot
                 data-route-id={route.id}
+                className={routeDrag ? 'transition-transform duration-200 ease-out' : 'transition-none'}
+                style={{
+                  ...(shift ? { transform: `translateY(${shift}px)` } : {}),
+                  ...(isDragging ? { minHeight: routeDrag.height } : {})
+                }}
               >
-                <article className="min-w-0 overflow-hidden rounded-xl border border-zinc-700 border-l-4 border-l-violet-400 bg-zinc-800 p-4 shadow-md">
-                <div className="flex min-w-0 items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-bold">{route.name}</h3>
-                    <p className="mt-1 truncate text-sm text-zinc-400">
-                      {route.leg1.startStopName} → {route.leg1.transferStopName}
-                      {' · '} {route.leg2.startStopName} → {route.leg2.destinationStopName}
-                    </p>
-                  </div>
+                <article
+                  onClickCapture={handleRouteClickCapture}
+                  onPointerDown={event => handleRoutePointerDown(event, route, index)}
+                  onTouchStart={event => handleRouteTouchStart(event, route, index)}
+                  className={`min-w-0 overflow-hidden rounded-xl border border-zinc-700 border-l-4 border-l-violet-400 bg-zinc-800 p-4 shadow-md select-none ${
+                    isDragging
+                      ? 'absolute z-50 cursor-grabbing scale-[1.02] shadow-2xl ring-2 ring-violet-300'
+                      : 'cursor-grab'
+                  }`}
+                  style={isDragging ? {
+                    left: routeDrag.positionX - routeDrag.offsetX,
+                    top: routeDrag.positionY - routeDrag.offsetY,
+                    width: routeDrag.width,
+                    height: routeDrag.height,
+                    touchAction: 'none'
+                  } : undefined}
+                >
+                <div className="flex min-w-0 items-center gap-2">
+                  <button
+                    type="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={detailsId}
+                    onClick={() => toggleRoute(route.id)}
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate font-bold">{route.name}</span>
+                      <DestinationText className="mt-1 text-sm text-zinc-400">
+                        {routeLegs.map(leg => leg.startStopName).filter(Boolean).join(' → ')}
+                        {' → '} {routeLegs[routeLegs.length - 1].endStopName}
+                      </DestinationText>
+                      {journey?.status === 'ready' && journey.rides[0] && (
+                        <span className={`mt-1 block transition-all duration-200 ${
+                          isExpanded ? 'text-sm font-medium text-zinc-300' : 'text-xs text-zinc-500'
+                        }`}>
+                          indulás: {formatClock(journey.rides[0].departure)}
+                          {' · '}érkezés: {formatClock(journey.rides[journey.rides.length - 1].arrival)}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={`h-5 w-5 flex-shrink-0 text-zinc-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+                    />
+                  </button>
                   <button
                     type="button"
                     onClick={() => removeRoute(route.id)}
@@ -1026,56 +1513,82 @@ export default function SavedRoutes() {
                   </button>
                 </div>
 
-                <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
-                  <div className="min-w-0 text-center">
-                    <span className="block truncate text-xs text-zinc-400">{route.leg1.startStopName}</span>
-                    <span className="mt-1 block truncate text-xl font-bold text-green-400">
-                      {journey?.status === 'ready' ? formatClock(journey.firstDeparture) : '--:--'}
-                    </span>
-                    <span className="mt-1 block truncate text-xs text-zinc-400">
-                      {getSelectedRoutes(route.leg1).map(vehicle => vehicle.route).join(' · ')}
-                    </span>
-                  </div>
-                  <ArrowRight className="h-4 w-4 flex-shrink-0 text-zinc-500" />
-                  <div className="min-w-0 text-center">
-                    <span className="block truncate text-xs text-zinc-400">{route.leg1.transferStopName}</span>
-                    <span className="mt-1 block truncate text-sm font-semibold text-violet-300">
-                      {journey?.status === 'ready' ? `+${journey.waitMinutes} perc` : `${route.transferWalkMinutes} perc séta`}
-                    </span>
-                    <span className="mt-1 block truncate text-xs text-zinc-400">
-                      {journey?.status === 'ready' ? formatClock(journey.transferArrival) : 'átszállás'}
-                    </span>
-                  </div>
-                  <ArrowRight className="h-4 w-4 flex-shrink-0 text-zinc-500" />
-                  <div className="min-w-0 text-center">
-                    <span className="block truncate text-xs text-zinc-400">{journey?.secondVehicle?.route || route.leg2.route}</span>
-                    <span className="mt-1 block truncate text-xl font-bold text-green-400">
-                      {journey?.status === 'ready' ? formatClock(journey.secondDeparture) : '--:--'}
-                    </span>
-                    <span className="mt-1 block truncate text-xs text-zinc-400">
-                      Felszállás: {route.leg2.startStopName}
-                    </span>
-                  </div>
-                </div>
+                <div
+                  id={detailsId}
+                  aria-hidden={!isExpanded}
+                  inert={!isExpanded}
+                  className={`saved-route-details${isExpanded ? ' is-open' : ''}`}
+                >
+                  <div className="saved-route-details-content">
+                <ol className="mt-4 space-y-3">
+                  {routeLegs.map((leg, index) => {
+                    const ride = journey?.rides?.[index];
+                    return (
+                      <li key={`${route.id}-leg-${index}`} className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-3 rounded-lg bg-zinc-700/60 p-3">
+                          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-purple-600/25 text-sm font-bold text-purple-200">
+                            {index + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="flex-shrink-0 text-lg font-bold text-green-400">
+                                {ride ? formatClock(ride.departure) : '--:--'}
+                              </span>
+                              {ride?.vehicle && (
+                                <VehicleBadge
+                                  route={ride.vehicle.route}
+                                  type={ride.vehicle.type}
+                                  color={ride.vehicle.color}
+                                  textColor={ride.vehicle.textColor}
+                                />
+                              )}
+                            </div>
+                            <p className="mt-1 truncate text-sm text-zinc-300">
+                              {leg.startStopName} → {leg.endStopName}
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              Érkezés: {ride ? formatClock(ride.arrival) : '--:--'}
+                            </p>
+                          </div>
+                        </div>
+                        {index < routeLegs.length - 1 && (
+                          <div className="ml-7 border-l-2 border-dashed border-zinc-600 py-2 pl-4">
+                            <p className="truncate text-xs text-zinc-400">
+                              Átszállás: {leg.endStopName} → {routeLegs[index + 1].startStopName}
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-violet-300">
+                              {journey?.transfers?.[index]
+                                ? `${routeTransfers[index]?.walkMinutes || 0} perc séta · ${journey.transfers[index].waitMinutes} perc várakozás`
+                                : `${routeTransfers[index]?.walkMinutes || 0} perc séta`}
+                            </p>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
 
                 <p className="mt-3 text-center text-xs text-zinc-500">
                   {journey?.status === 'ready'
-                    ? `${route.transferWalkMinutes} perc séta · ${journey.waitMinutes} perc várakozás`
+                    ? `${routeLegs.length} járat · a teljes csatlakozás betöltve`
                     : journey?.status === 'no-key'
                       ? 'Az élő indulásokhoz állítsd be a BKK API-kulcsot.'
                       : journey?.status === 'error'
                         ? 'Nem sikerült betölteni az élő adatokat. Próbáld újra később.'
                         : journey?.status === 'empty'
-                          ? 'A következő órában nem található teljesíthető csatlakozás.'
+                          ? 'A következő 6 órában nem található teljesíthető csatlakozás.'
                           : !API_KEY || API_KEY === 'A_TE_API_KULCSOD'
                             ? 'Az élő indulásokhoz állítsd be a BKK API-kulcsot.'
                             : 'Élő csatlakozás keresése...'}
                 </p>
+                  </div>
+                </div>
                 </article>
               </div>
             );
           })}
         </div>
+        </>
       )}
 
       {storageError && <p className="mt-3 text-sm text-red-400" role="alert">{storageError}</p>}

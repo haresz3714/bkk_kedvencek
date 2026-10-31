@@ -1,13 +1,17 @@
-function normalizeStopGroupName(name) {
+function getCanonicalStopName(name) {
   return name
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/\s+M$/i, '')
+    .replace(/\s+M(?:\s*\+\s*H)?$/i, '');
+}
+
+function normalizeStopGroupName(name) {
+  return getCanonicalStopName(name)
     .toLocaleLowerCase('hu');
 }
 
-function isMetroVariant(name) {
-  return /\s+M$/i.test(name);
+function isTransitStationVariant(name) {
+  return getCanonicalStopName(name) !== name.trim().replace(/\s+/g, ' ');
 }
 
 export function groupStopsByName(stopIds, stopsById) {
@@ -19,7 +23,7 @@ export function groupStopsByName(stopIds, stopsById) {
 
     const name = stop.name.trim().replace(/\s+/g, ' ');
     const key = normalizeStopGroupName(name);
-    const stopId = stop.id || id;
+    const stopId = id;
     let group = groupedStops.get(key);
 
     if (!group) {
@@ -28,7 +32,7 @@ export function groupStopsByName(stopIds, stopsById) {
     }
 
     if (!group.stopIds.includes(stopId)) group.stopIds.push(stopId);
-    if (isMetroVariant(group.name) && !isMetroVariant(name)) {
+    if (isTransitStationVariant(group.name) && !isTransitStationVariant(name)) {
       group.name = name;
     }
   });
