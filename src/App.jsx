@@ -1077,7 +1077,7 @@ export default function App() {
     <div data-theme={theme} className="app-shell min-h-dvh bg-zinc-900 text-white p-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-[calc(5rem+env(safe-area-inset-bottom,0px))] pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] font-sans flex flex-col">
       <div className="max-w-md mx-auto w-full flex-1">
         <div className="relative mb-6 flex items-center justify-center">
-          <h1 className="text-2xl font-bold text-center text-violet-300">BudapestGO <i>Rapid</i></h1>
+          <h1 className="max-w-full px-12 text-2xl font-bold leading-tight text-center text-violet-300">BudapestGO <i>Rapid</i></h1>
           <button
             type="button"
             onClick={() => setTheme(currentTheme => currentTheme === 'dark' ? 'light' : 'dark')}
