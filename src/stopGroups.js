@@ -2,10 +2,10 @@ function getCanonicalStopName(name) {
   return name
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/\s+M(?:\s*\+\s*H)?$/i, '');
+    .replace(/\s+(?:M(?:\s*\+\s*H)?|H)$/i, '');
 }
 
-function normalizeStopGroupName(name) {
+export function normalizeStopGroupName(name) {
   return getCanonicalStopName(name)
     .toLocaleLowerCase('hu');
 }

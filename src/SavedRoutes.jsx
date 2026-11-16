@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowDown, Check, ChevronDown, Clock, MapPin, Plus, Route, Trash2, X } from 'lucide-react';
 import DestinationText from './DestinationText.jsx';
 import VehicleBadge from './VehicleBadge.jsx';
-import { groupStopsByName } from './stopGroups.js';
+import { groupStopsByName, normalizeStopGroupName } from './stopGroups.js';
 import { sortRouteOptions } from './routeOptions.js';
 
 const API_KEY = import.meta.env.VITE_BKK_API_KEY;
@@ -778,6 +778,17 @@ function getRouteTransfers(route, legs) {
   }].slice(0, Math.max(0, legs.length - 1));
 }
 
+function matchesLegEndStop(stopTime, leg, stopsById = {}) {
+  const endStopIds = leg.endStopIds || [leg.endStopId];
+  if (stopTime.stopId && endStopIds.includes(stopTime.stopId)) return true;
+  const stop = stopTime.stopId ? stopsById[stopTime.stopId] : null;
+  if (stop?.parentStationId && endStopIds.includes(stop.parentStationId)) return true;
+  if (leg.endStopName && stop?.name) {
+    return normalizeStopGroupName(stop.name) === normalizeStopGroupName(leg.endStopName);
+  }
+  return false;
+}
+
 function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
   const legs = getRouteLegs(route);
   const transfers = getRouteTransfers(route, legs);
@@ -790,11 +801,21 @@ function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
     return { status: 'error' };
   }
 
-  const departuresByLeg = legs.map(leg => getSelectedRoutes(leg).flatMap(vehicle =>
-    (vehicle.stopIds || leg.startStopIds || [leg.startStopId])
-      .flatMap(stopId => getStopTimes(stopDataById.get(stopId), vehicle)
-        .map(departure => ({ ...departure, vehicle, stopId })))
-  ).sort((a, b) => a.time - b.time));
+  const departuresByLeg = legs.map(leg => {
+    const seenTrips = new Set();
+    return getSelectedRoutes(leg).flatMap(vehicle =>
+      (vehicle.stopIds || leg.startStopIds || [leg.startStopId])
+        .flatMap(stopId => getStopTimes(stopDataById.get(stopId), vehicle)
+          .map(departure => ({ ...departure, vehicle, stopId })))
+    )
+      .sort((a, b) => a.time - b.time)
+      .filter(departure => {
+        const key = `${departure.tripId}:${departure.serviceDate || ''}`;
+        if (seenTrips.has(key)) return false;
+        seenTrips.add(key);
+        return true;
+      });
+  });
   const arrivalByTrip = new Map();
   const tripDetailsNeeded = new Map();
   const getArrival = (leg, departure, legIndex) => {
@@ -803,10 +824,12 @@ function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
     if (arrivalByTrip.has(cacheKey)) return arrivalByTrip.get(cacheKey);
     for (const stopId of leg.endStopIds || [leg.endStopId]) {
       const data = stopDataById.get(stopId);
-      const matched = (data?.entry?.stopTimes || []).find(stopTime =>
-        stopTime.tripId === departure.tripId &&
-        (leg.endStopIds || [leg.endStopId]).includes(stopTime.stopId)
-      );
+      const matched = (data?.entry?.stopTimes || []).find(stopTime => {
+        if (stopTime.tripId !== departure.tripId) return false;
+        const arrival = stopTime.predictedArrivalTime || stopTime.arrivalTime ||
+          stopTime.predictedDepartureTime || stopTime.departureTime;
+        return Number.isFinite(arrival) && arrival >= departure.time;
+      });
       if (!matched) continue;
       const arrival = matched.predictedArrivalTime || matched.arrivalTime ||
         matched.predictedDepartureTime || matched.departureTime;
@@ -815,17 +838,23 @@ function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
         return arrival;
       }
     }
-    const tripDetails = tripDetailsById.get(tripKey);
-    if (tripDetails) {
-      const matched = (tripDetails.entry?.stopTimes || []).find(stopTime =>
-        (leg.endStopIds || [leg.endStopId]).includes(stopTime.stopId)
-      );
+    if (tripDetailsById.has(tripKey)) {
+      const tripDetails = tripDetailsById.get(tripKey);
+      const stops = tripDetails?.references?.stops || {};
+      const matched = (tripDetails?.entry?.stopTimes || []).find(stopTime => {
+        if (!matchesLegEndStop(stopTime, leg, stops)) return false;
+        const arrival = stopTime.predictedArrivalTime || stopTime.arrivalTime ||
+          stopTime.predictedDepartureTime || stopTime.departureTime;
+        return Number.isFinite(arrival) && arrival >= departure.time;
+      });
       const arrival = matched?.predictedArrivalTime || matched?.arrivalTime ||
         matched?.predictedDepartureTime || matched?.departureTime;
       if (Number.isFinite(arrival)) {
         arrivalByTrip.set(cacheKey, arrival);
         return arrival;
       }
+      arrivalByTrip.set(cacheKey, null);
+      return null;
     }
 
     tripDetailsNeeded.set(tripKey, {
@@ -872,7 +901,8 @@ function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
           waitMinutes: Math.max(0, Math.round((nextDeparture.time - earliestDeparture) / 60))
         }]
       );
-      if (result) return result;
+      if (result && tripDetailsNeeded.size === 0) return result;
+      if (tripDetailsNeeded.size >= 4) return null;
     }
     failedJourneyStates.add(stateKey);
     return null;
@@ -881,7 +911,8 @@ function calculateJourney(route, stopDataById, tripDetailsById = new Map()) {
   for (const departure of departuresByLeg[0]) {
     if (departure.time < now - 60) continue;
     const result = continueJourney(0, departure, [], []);
-    if (result) return result;
+    if (result && tripDetailsNeeded.size === 0) return result;
+    if (tripDetailsNeeded.size >= 4) break;
   }
   return tripDetailsNeeded.size > 0
     ? { status: 'needs-trip-details', trips: [...tripDetailsNeeded.values()] }
